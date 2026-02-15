@@ -275,16 +275,25 @@ resource "aws_lambda_provisioned_concurrency_config" "api" {
 ```
 
 ### DynamoDB Capacity
-```hcl
-# Development - On-demand
-billing_mode = "PAY_PER_REQUEST"
 
-# Production - Provisioned with autoscaling
-billing_mode = "PROVISIONED"
-read_capacity_units  = 100
-write_capacity_units = 100
-# + autoscaling targets
+**All Environments - On-Demand Billing (Recommended)**:
+```hcl
+# DynamoDB on-demand: ~$20/month for family usage
+# Scales automatically, no provisioning needed
+resource "aws_dynamodb_table" "photos" {
+  billing_mode = "PAY_PER_REQUEST"  # ← On-demand, not provisioned
+  
+  # No capacity units needed - AWS manages scaling
+  # Costs ~$1.25 per 1M writes, $0.25 per 1M reads
+}
 ```
+
+**Why:** 
+- Simpler management (no capacity planning)
+- Better for unpredictable family usage patterns
+- ~$20/month for 6 users (steady state)
+- Automatically scales up for spikes
+- No complex autoscaling policies needed
 
 ### S3 Lifecycle
 ```hcl

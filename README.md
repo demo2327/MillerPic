@@ -31,17 +31,23 @@ Store your family's lifetime collection of photos and videos with full resolutio
 
 ## 💰 Cost
 
-**Estimated monthly cost for family of 4:**
-- **100GB**: ~$12/month (free tier year 1)
-- **1TB**: ~$93/month
-- **5TB**: ~$438/month
+**Estimated monthly cost (optimized with WebP + Intelligent-Tiering + On-Demand DynamoDB):**
+- **100GB**: $10-15/month (free tier year 1)
+- **1TB**: $15-25/month
+- **5TB**: ~$94/month (steady state, 6 family members)
 
-Includes: storage, compute, CDN, database, monitoring.
+**Compared to Alternatives:**
+- MillerPic: **$94/month** ✅ (5TB, full resolution, complete control)
+- Google One: $100/month (2TB only, limited control)
+- OneDrive: $120/month (6 users @ 200GB = $20 each)
+- SmugMug: $240/month (limited storage)
+- Shutterfly: $150-200/month
 
-Compare to:
-- Google One: $100/month (2TB limit)
-- OneDrive: $70/month (1TB limit)
-- Shutterfly/SmugMug: $150+/month
+**10-Year Total Cost:**
+- MillerPic: ~$11,280 (scales with old data archival)
+- Competitors: $36,000+ 
+
+See [COST_ESTIMATE.md](docs/COST_ESTIMATE.md) for detailed cost breakdown & optimization strategies.
 
 ## 🏗️ Architecture
 
