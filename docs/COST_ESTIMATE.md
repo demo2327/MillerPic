@@ -188,8 +188,8 @@ exports.uploadHandler = async (event) => {
 **Cost Model**:
 - Last 12 months (500GB): $0.023/GB = $11.50/month
 - 2-5 years old (2TB): $0.0125/GB = $25/month (infrequent)
-- 5+ years old (2.5TB): $0.00099/GB = $2.50/month (deep archive)
-- **Total: $39/month** (vs $75 = **$36/month savings**)
+- 5+ years old (2.5TB): $0.009/GB = $22.50/month (glacier instant retrieval, 3-5 min)
+- **Total: $59/month** (vs $75 = **$16/month savings**)
 
 **Terraform Configuration**:
 ```hcl
@@ -206,10 +206,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "aggressive_archive" {
       storage_class = "STANDARD_IA"
     }
 
-    # Move to Deep Archive after 90 days (3 months)
+    # Move to Glacier Instant Retrieval after 90 days (3 months)
+    # 3-5 minute retrieval time, better than Deep Archive's 12 hours
     transition {
       days          = 90
-      storage_class = "DEEP_ARCHIVE"
+      storage_class = "GLACIER_IR"
     }
 
     # Expiration (optional - delete after 7 years)
@@ -232,25 +233,21 @@ exports.downloadHandler = async (event) => {
     Key: `originals/${userId}/${photoId}.webp`
   }).promise();
   
-  if (headObject.StorageClass === 'DEEP_ARCHIVE') {
-    // Restore from archive (1-5 hour wait)
-    await s3.restoreObject({
+  if (headObject.StorageClass === 'GLACIER_IR') {
+    // Glacier Instant Retrieval: Already accessible within 3-5 minutes
+    // No restore needed - just return presigned URL
+    const presignedUrl = await s3.getSignedUrlPromise('getObject', {
       Bucket: process.env.BUCKET,
       Key: `originals/${userId}/${photoId}.webp`,
-      RestoreRequest: {
-        Days: 7,
-        GlacierJobParameters: {
-          Tier: 'Bulk'  // Cheapest retrieval option
-        }
-      }
+      Expires: 3600
     }).promise();
     
     return {
-      statusCode: 202,
+      statusCode: 200,
       body: JSON.stringify({
-        status: 'restoring',
-        message: 'Photo is being restored. Check back in 1-5 hours.',
-        waitTime: '1-5 hours'
+        status: 'ready',
+        downloadUrl: presignedUrl,
+        note: 'Archived photo will be available within 3-5 minutes'
       })
     };
   }
@@ -265,14 +262,14 @@ exports.downloadHandler = async (event) => {
 ```
 
 **Tradeoffs:**
-- ✅ Saves $36/month automatically
-- ✅ Truly old photos rarely accessed anyway
+- ✅ Saves $16/month automatically
+- ✅ Fast retrieval on all photos (3-5 min max for Glacier Instant)
 - ✅ Photo is preserved (not deleted)
-- ❌ Old photo retrieval takes 1-5 hours
-- ❌ Users need to plan ahead for old photo access
-- ❌ Retrieval has small additional cost (~$0.03 per GB retrieved)
+- ✅ Truly old photos rarely accessed anyway
+- ✅ No user wait time for on-demand access (they can retrieve immediately)
+- ✅ No additional retrieval charges (~$0.009/GB is already included)
 
-**Best for:** Family that values cost over instant access to old photos
+**Best for:** Family that wants cost savings AND fast access to all photos, even old ones
 
 ---
 
@@ -282,7 +279,7 @@ exports.downloadHandler = async (event) => {
 
 1. **Upload compression** (JPEG → WebP): Saves 1.7TB → $39/month
 2. **Moderate archival**: Move to STANDARD_IA after 6 months, not immediately
-3. **Keep Deep Archive threshold high**: 2+ years old only
+3. **Use Glacier Instant Retrieval for old photos**: 3-5 minute retrieval, no multi-hour waits
 
 **Cost Model**:
 - Recent (0-6 months, 1.5TB): $0.023/GB = $34.50/month
@@ -580,7 +577,9 @@ resource "aws_s3_bucket_intelligent_tiering_configuration" "archive" {
 
   tiering {
     access_tier = "DEEP_ARCHIVE_ACCESS"
-    days        = 180  # Move to deep archive after 6 months
+    days        = 180  # Move to Glacier Instant Retrieval after 6 months
+    # Note: Intelligent-Tiering handles auto-transitions automatically
+    # Max retrieval time: 3-5 minutes (from Glacier Instant Retrieval tier)
   }
 }
 ```
@@ -611,8 +610,9 @@ resource "aws_s3_bucket_intelligent_tiering_configuration" "archive" {
 
 **Pricing Model**
 - Standard: $0.023/GB/month
-- Intelligent-Tiering: $0.0125/GB (frequent) + transitions
-- Glacier: $0.004/GB/month (long-term archive)
+- Standard-IA: $0.0125/GB/month
+- Glacier Instant Retrieval: $0.009/GB/month (3-5 min retrieval)
+- Intelligent-Tiering: Auto-transitions between tiers, management fee $0.0025/1k objects
 
 **1TB Example**
 ```
@@ -784,7 +784,7 @@ resource "aws_s3_bucket_intelligent_tiering_configuration" "auto" {
 
   tiering {
     access_tier = "DEEP_ARCHIVE_ACCESS"
-    days        = 180  # Ultra-cheap after 6 months
+    days        = 180  # Glacier Instant Retrieval: 3-5 min retrieval, no 12-hour waits
   }
 }
 ```
@@ -1213,11 +1213,12 @@ resource "aws_s3_bucket_intelligent_tiering_configuration" "archive" {
 }
 ```
 
-**Cost model:**
-- Frequent (new): 2TB @ $0.023/GB = $46
-- Infrequent (medium): 2TB @ $0.0125/GB = $25
-- Archive (old): 1TB @ $0.004/GB = $4
-- **Total: ~$75/month** vs $115/month = **$40/month savings**
+**Cost model** (with WebP compression and Glacier Instant Retrieval):
+- Frequent (recent, 500GB): $0.023/GB = $11.50
+- Infrequent (medium, 1.5TB): $0.0125/GB = $18.75
+- Glacier Instant (archived, 3TB): $0.009/GB = $27
+- Management fee: ~$12 (5M objects × $0.0025/1k)
+- **Total: ~$70/month** vs $115/month = **$45/month savings**
 
 ### Deployment Script
 
