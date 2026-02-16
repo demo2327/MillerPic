@@ -47,6 +47,13 @@ def handler(event, context):
                 "statusCode": 404,
                 "body": json.dumps({"error": "photo not found"})
             }
+        
+        # Check if photo is soft deleted
+        if item.get("DeletedAt"):
+            return {
+                "statusCode": 404,
+                "body": json.dumps({"error": "photo not found"})
+            }
 
         download_url = s3.generate_presigned_url(
             "get_object",
