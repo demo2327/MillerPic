@@ -27,7 +27,7 @@ Use cloud agents to accelerate delivery while keeping scope small, testable, and
 ## Sprint Status
 
 - Sprint 1: Complete (issues #11, #12, #14, #26 closed)
-- Sprint 2: Ready to start (#13, #15, #16 open)
+- Sprint 2: Complete (#13, #15, #16 delivered)
 - Closeout report: `docs/SPRINT_1_CLOSEOUT.md`
 
 ### P0 (Do first)
