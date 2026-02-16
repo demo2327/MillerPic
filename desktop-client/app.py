@@ -373,8 +373,20 @@ class MillerPicDesktopApp:
                 )
             self.log(f"PUT signed-url -> {put_response.status_code}")
             if put_response.status_code in (200, 201):
-                self.log("Upload complete.")
+                self.log("Upload complete to storage.")
                 self.download_photo_id_var.set(payload["photoId"])
+
+                upload_complete_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-complete"
+                complete_payload = {"photoId": payload["photoId"]}
+                self.log("Finalizing upload metadata...")
+                complete_response = requests.post(upload_complete_url, headers=headers, json=complete_payload, timeout=30)
+                complete_body = self._safe_json(complete_response)
+                self.log(f"POST /photos/upload-complete -> {complete_response.status_code}")
+                self.log(pretty_json(complete_body))
+
+                if complete_response.status_code == 200:
+                    self.log("Upload finalized. Refreshing photo list...")
+                    self.root.after(0, self.on_list_photos)
             else:
                 self.log(put_response.text[:2000])
         except requests.RequestException as error:
