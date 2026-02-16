@@ -16,6 +16,12 @@ variable "project_name" {
   default     = "millerpic"
 }
 
+variable "environment" {
+  description = "Deployment environment name used in secret naming"
+  type        = string
+  default     = "dev"
+}
+
 variable "state_bucket_prefix" {
   description = "Prefix for Terraform state bucket"
   type        = string
@@ -26,4 +32,22 @@ variable "terraform_deployer_user_name" {
   description = "IAM user name for Terraform deployment operations"
   type        = string
   default     = "millerpic_tf"
+}
+
+variable "jwt_issuer" {
+  description = "JWT issuer URL stored in Secrets Manager for app infrastructure"
+  type        = string
+  default     = "https://accounts.google.com"
+}
+
+variable "jwt_audience" {
+  description = "JWT audiences stored in Secrets Manager for app infrastructure"
+  type        = list(string)
+  default     = []
+}
+
+variable "cost_alert_email" {
+  description = "Optional alert email stored in Secrets Manager"
+  type        = string
+  default     = ""
 }

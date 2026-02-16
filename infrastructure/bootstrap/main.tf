@@ -19,7 +19,8 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  state_bucket_name = "${var.state_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+  state_bucket_name         = "${var.state_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+  app_sensitive_secret_name = "${var.project_name}/${var.environment}/app-sensitive-config"
 }
 
 resource "aws_s3_bucket" "terraform_state" {
@@ -55,6 +56,20 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
 
 resource "aws_iam_user" "terraform_deployer" {
   name = var.terraform_deployer_user_name
+}
+
+resource "aws_secretsmanager_secret" "app_sensitive_config" {
+  name        = local.app_sensitive_secret_name
+  description = "Sensitive application configuration for ${var.project_name} ${var.environment}"
+}
+
+resource "aws_secretsmanager_secret_version" "app_sensitive_config" {
+  secret_id = aws_secretsmanager_secret.app_sensitive_config.id
+  secret_string = jsonencode({
+    jwt_issuer       = var.jwt_issuer
+    jwt_audience     = var.jwt_audience
+    cost_alert_email = var.cost_alert_email
+  })
 }
 
 resource "aws_iam_user_policy" "terraform_deployer_inline" {
@@ -106,12 +121,15 @@ resource "aws_iam_user_policy" "terraform_deployer_inline" {
         Effect = "Allow"
         Action = [
           "apigateway:*",
+          "budgets:*",
           "cloudwatch:*",
           "dynamodb:*",
           "events:*",
           "iam:CreateRole",
           "iam:DeleteRole",
           "iam:GetRole",
+          "iam:TagRole",
+          "iam:UntagRole",
           "iam:UpdateAssumeRolePolicy",
           "iam:PutRolePolicy",
           "iam:DeleteRolePolicy",
@@ -123,6 +141,8 @@ resource "aws_iam_user_policy" "terraform_deployer_inline" {
           "iam:CreatePolicy",
           "iam:DeletePolicy",
           "iam:GetPolicy",
+          "iam:TagPolicy",
+          "iam:UntagPolicy",
           "iam:GetPolicyVersion",
           "iam:CreatePolicyVersion",
           "iam:DeletePolicyVersion",
@@ -131,6 +151,7 @@ resource "aws_iam_user_policy" "terraform_deployer_inline" {
           "logs:*",
           "s3:*",
           "secretsmanager:*",
+          "sns:*",
           "xray:*",
           "sts:GetCallerIdentity"
         ]

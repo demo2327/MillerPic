@@ -14,8 +14,8 @@ resource "aws_apigatewayv2_authorizer" "jwt" {
   name = "${var.project_name}-jwt-authorizer-${var.environment}"
 
   jwt_configuration {
-    issuer   = var.jwt_issuer
-    audience = var.jwt_audience
+    issuer   = local.jwt_issuer_effective
+    audience = local.jwt_audience_effective
   }
 }
 
@@ -183,6 +183,11 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.http_api.id
   name        = "$default"
   auto_deploy = true
+
+  default_route_settings {
+    throttling_rate_limit  = var.api_throttle_rate_limit
+    throttling_burst_limit = var.api_throttle_burst_limit
+  }
 }
 
 resource "aws_lambda_permission" "allow_apigw_upload" {

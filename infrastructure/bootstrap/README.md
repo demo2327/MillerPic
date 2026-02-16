@@ -4,6 +4,7 @@ This stack creates:
 - S3 bucket for Terraform remote state
 - IAM user for Terraform deployment (`millerpic_tf` by default)
 - Inline custom policy with required deployment permissions
+- AWS Secrets Manager entry for sensitive app config (`jwt_issuer`, `jwt_audience`, `cost_alert_email`)
 
 ## Usage
 
@@ -24,9 +25,12 @@ Set-Location infrastructure/bootstrap
 & $terraformPath apply -var="bootstrap_profile=pandacloud"
 ```
 
+If you prefer `terraform.tfvars`, copy `terraform.tfvars.example` in this folder and fill in your values before apply.
+
 ## After Apply
 
 1. Create access keys for output user (`millerpic_tf` by default).
 2. Configure local AWS profile `millerpic_tf` with those keys.
 3. Create `infrastructure/backend.tf` using `suggested_backend_block` output from this bootstrap stack.
-4. Run Terraform for app infrastructure using the new deployer profile.
+4. Note `app_sensitive_config_secret_name` output; app infrastructure reads this secret by default naming convention (`<project>/<environment>/app-sensitive-config`) or via explicit override.
+5. Run Terraform for app infrastructure using the new deployer profile.

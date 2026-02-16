@@ -1,5 +1,11 @@
 aws_region                  = "us-east-1"
 bootstrap_profile           = "pandacloud"
 project_name                = "millerpic"
+environment                 = "dev"
 state_bucket_prefix         = "millerpic-terraform-state"
 terraform_deployer_user_name = "millerpic_tf"
+
+# Sensitive app config stored in AWS Secrets Manager by this bootstrap stack.
+jwt_issuer                  = "https://accounts.google.com"
+jwt_audience                = ["replace-with-your-google-client-id.apps.googleusercontent.com"]
+cost_alert_email            = "replace-me@example.com"
