@@ -68,12 +68,15 @@ class MillerPicDesktopApp:
         self.search_query_var = tk.StringVar()
         self.search_limit_var = tk.StringVar(value="20")
         self.queue_parallelism_var = tk.StringVar(value=str(DEFAULT_QUEUE_PARALLELISM))
+        self.queue_status_filter_var = tk.StringVar(value="ALL")
+        self.queue_search_filter_var = tk.StringVar()
         self.latest_photos = []
         self.upload_queue_items = []
         self.upload_queue_running = False
         self.upload_queue_lock = threading.Lock()
         self.managed_folders = []
         self.synced_files = {}
+        self._queue_refresh_scheduled = False
         self.google_credentials = None
 
         self._load_local_state()
@@ -169,6 +172,26 @@ class MillerPicDesktopApp:
         self.queue_tree.column("status", width=120)
         self.queue_tree.column("message", width=420)
         self.queue_tree.pack(fill=X, pady=(8, 0))
+
+        queue_manage_row = ttk.Frame(upload_frame)
+        queue_manage_row.pack(fill=X, pady=(8, 0))
+        ttk.Label(queue_manage_row, text="Queue Filter").pack(side=LEFT)
+        queue_status_values = [
+            "ALL", "QUEUED", "UPLOADING", "COMPLETED", "FAILED", "SKIPPED_VIDEO", "CANCELLED"
+        ]
+        ttk.Combobox(
+            queue_manage_row,
+            textvariable=self.queue_status_filter_var,
+            values=queue_status_values,
+            width=14,
+            state="readonly",
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Entry(queue_manage_row, textvariable=self.queue_search_filter_var, width=24).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_manage_row, text="Apply", command=self.on_apply_queue_filters).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_manage_row, text="Reset", command=self.on_reset_queue_filters).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_manage_row, text="Clear Completed", command=self.on_clear_completed_queue_items).pack(side=LEFT, padx=(12, 0))
+        ttk.Button(queue_manage_row, text="Clear Failed", command=self.on_clear_failed_queue_items).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_manage_row, text="Clear Skipped", command=self.on_clear_skipped_queue_items).pack(side=LEFT, padx=(8, 0))
 
         download_frame = ttk.LabelFrame(container, text="Get Download URL", padding=10)
         download_frame.pack(fill=X, pady=(12, 0))
@@ -844,25 +867,75 @@ class MillerPicDesktopApp:
         self._run_in_thread(self._run_upload_queue_flow, headers, max_parallel)
 
     def _queue_insert_item(self, item):
-        file_path = item.get("filePath") or ""
-        file_name = item.get("fileName") or os.path.basename(file_path)
-        item["fileName"] = file_name
-        self.queue_tree.insert(
-            "",
-            "end",
-            iid=item["photoId"],
-            values=(file_name, item.get("status") or "", item.get("message") or ""),
-        )
+        self._schedule_queue_refresh()
+
+    def _schedule_queue_refresh(self):
+        if self._queue_refresh_scheduled:
+            return
+        self._queue_refresh_scheduled = True
+        self.root.after(50, self._refresh_queue_tree_view)
+
+    def _refresh_queue_tree_view(self):
+        self._queue_refresh_scheduled = False
+
+        for item_id in self.queue_tree.get_children():
+            self.queue_tree.delete(item_id)
+
+        status_filter = (self.queue_status_filter_var.get() or "ALL").strip().upper()
+        search_filter = (self.queue_search_filter_var.get() or "").strip().lower()
+
+        for item in self.upload_queue_items:
+            file_path = item.get("filePath") or ""
+            file_name = item.get("fileName") or os.path.basename(file_path)
+            item["fileName"] = file_name
+            status = (item.get("status") or "").upper()
+            message = item.get("message") or ""
+
+            if status_filter != "ALL" and status != status_filter:
+                continue
+
+            if search_filter and search_filter not in file_name.lower() and search_filter not in message.lower():
+                continue
+
+            self.queue_tree.insert(
+                "",
+                "end",
+                iid=item["photoId"],
+                values=(file_name, status, message),
+            )
 
     def _queue_update_item(self, photo_id, status, message=""):
         def _apply_update():
-            if not self.queue_tree.exists(photo_id):
-                return
-            current = self.queue_tree.item(photo_id, "values")
-            file_name = current[0] if current else ""
-            self.queue_tree.item(photo_id, values=(file_name, status, message))
+            self._schedule_queue_refresh()
 
         self.root.after(0, _apply_update)
+
+    def on_apply_queue_filters(self):
+        self._schedule_queue_refresh()
+
+    def on_reset_queue_filters(self):
+        self.queue_status_filter_var.set("ALL")
+        self.queue_search_filter_var.set("")
+        self._schedule_queue_refresh()
+
+    def _clear_queue_items_by_status(self, statuses):
+        status_set = {status.upper() for status in statuses}
+        before = len(self.upload_queue_items)
+        self.upload_queue_items = [
+            item for item in self.upload_queue_items if (item.get("status") or "").upper() not in status_set
+        ]
+        removed = before - len(self.upload_queue_items)
+        self._schedule_queue_refresh()
+        self.log(f"Removed {removed} queue rows for statuses: {', '.join(sorted(status_set))}")
+
+    def on_clear_completed_queue_items(self):
+        self._clear_queue_items_by_status({"COMPLETED"})
+
+    def on_clear_failed_queue_items(self):
+        self._clear_queue_items_by_status({"FAILED"})
+
+    def on_clear_skipped_queue_items(self):
+        self._clear_queue_items_by_status({"SKIPPED_VIDEO"})
 
     @staticmethod
     def _extract_error_message(response_body, fallback_message):
