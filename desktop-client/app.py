@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import uuid
+import webbrowser
 from tkinter import END, BOTH, LEFT, RIGHT, X, filedialog, messagebox, ttk
 import tkinter as tk
 
@@ -26,11 +27,13 @@ class MillerPicDesktopApp:
         self.api_base_url_var = tk.StringVar(value=DEFAULT_API_BASE_URL)
         self.id_token_var = tk.StringVar()
         self.selected_file_var = tk.StringVar()
+        self.selected_file_name_var = tk.StringVar()
         self.content_type_var = tk.StringVar(value="image/webp")
         self.photo_id_var = tk.StringVar()
         self.download_photo_id_var = tk.StringVar()
         self.list_limit_var = tk.StringVar(value="20")
         self.list_next_token_var = tk.StringVar()
+        self.latest_photos = []
 
         self._build_ui()
 
@@ -91,6 +94,28 @@ class MillerPicDesktopApp:
         ttk.Entry(list_frame, textvariable=self.list_next_token_var, width=72).grid(row=1, column=1, sticky="ew", padx=(0, 10))
 
         ttk.Button(list_frame, text="List Photos", command=self.on_list_photos).grid(row=1, column=2, sticky="w")
+
+        self.photos_tree = ttk.Treeview(
+            list_frame,
+            columns=("fileName", "photoId", "contentType", "createdAt"),
+            show="headings",
+            height=6,
+        )
+        self.photos_tree.heading("fileName", text="File Name")
+        self.photos_tree.heading("photoId", text="Photo ID")
+        self.photos_tree.heading("contentType", text="Content-Type")
+        self.photos_tree.heading("createdAt", text="Created At")
+        self.photos_tree.column("fileName", width=260)
+        self.photos_tree.column("photoId", width=240)
+        self.photos_tree.column("contentType", width=150)
+        self.photos_tree.column("createdAt", width=180)
+        self.photos_tree.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+
+        actions_row = ttk.Frame(list_frame)
+        actions_row.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Button(actions_row, text="Use Selected for Download", command=self.on_use_selected_photo).pack(side=LEFT)
+        ttk.Button(actions_row, text="Open Selected Image", command=self.on_open_selected_image).pack(side=LEFT, padx=(8, 0))
+
         list_frame.columnconfigure(1, weight=1)
 
         output_frame = ttk.LabelFrame(container, text="Output", padding=10)
@@ -121,6 +146,7 @@ class MillerPicDesktopApp:
             return
 
         self.selected_file_var.set(file_path)
+        self.selected_file_name_var.set(os.path.basename(file_path))
         guessed_type, _ = mimetypes.guess_type(file_path)
         if guessed_type:
             self.content_type_var.set(guessed_type)
@@ -185,7 +211,11 @@ class MillerPicDesktopApp:
             messagebox.showerror("Missing photo ID", "Enter a photo ID.")
             return
 
-        payload = {"photoId": photo_id, "contentType": content_type}
+        payload = {
+            "photoId": photo_id,
+            "contentType": content_type,
+            "originalFileName": self.selected_file_name_var.get().strip() or os.path.basename(file_path),
+        }
         upload_init_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-url"
 
         self._run_in_thread(self._upload_flow, upload_init_url, headers, payload, file_path, content_type)
@@ -250,6 +280,62 @@ class MillerPicDesktopApp:
         except Exception as error:
             self.log(f"Unexpected error: {error}")
 
+    def on_use_selected_photo(self):
+        selected_photo = self._get_selected_photo()
+        if not selected_photo:
+            messagebox.showerror("No selection", "Select a photo row first.")
+            return
+
+        photo_id = selected_photo.get("photoId")
+        if photo_id:
+            self.download_photo_id_var.set(photo_id)
+            self.log(f"Selected photo for download lookup: {photo_id}")
+
+    def on_open_selected_image(self):
+        selected_photo = self._get_selected_photo()
+        if not selected_photo:
+            messagebox.showerror("No selection", "Select a photo row first.")
+            return
+
+        content_type = (selected_photo.get("contentType") or "").lower()
+        if content_type and not content_type.startswith("image/"):
+            messagebox.showerror("Not an image", f"Selected item is '{content_type}', not an image.")
+            return
+
+        headers = self._headers()
+        if not headers:
+            return
+
+        photo_id = selected_photo.get("photoId")
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos/{photo_id}/download-url"
+        self._run_in_thread(self._open_selected_image_flow, endpoint, headers, photo_id)
+
+    def _open_selected_image_flow(self, endpoint, headers, photo_id):
+        try:
+            self.log(f"Requesting download URL for selected photoId={photo_id}...")
+            response = requests.get(endpoint, headers=headers, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"GET /photos/{{photoId}}/download-url -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code != 200:
+                return
+
+            download_url = body.get("downloadUrl")
+            if not download_url:
+                self.log("downloadUrl missing in response.")
+                return
+
+            opened = webbrowser.open(download_url)
+            if opened:
+                self.log(f"Opened image in default browser for photoId={photo_id}.")
+            else:
+                self.log("Could not open browser automatically. Copy downloadUrl from output.")
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
     def on_list_photos(self):
         headers = self._headers()
         if not headers:
@@ -282,6 +368,7 @@ class MillerPicDesktopApp:
             photos = body.get("photos") or []
             next_token = body.get("nextToken") or ""
             self.list_next_token_var.set(next_token)
+            self.root.after(0, self._refresh_photos_table, photos)
 
             if photos:
                 first_photo_id = photos[0].get("photoId")
@@ -294,6 +381,36 @@ class MillerPicDesktopApp:
             self.log(f"Network error: {error}")
         except Exception as error:
             self.log(f"Unexpected error: {error}")
+
+    def _refresh_photos_table(self, photos):
+        self.latest_photos = photos
+        for item_id in self.photos_tree.get_children():
+            self.photos_tree.delete(item_id)
+
+        for index, item in enumerate(photos):
+            self.photos_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    item.get("fileName") or "",
+                    item.get("photoId") or "",
+                    item.get("contentType") or "",
+                    item.get("createdAt") or "",
+                ),
+            )
+
+        if photos:
+            self.photos_tree.selection_set("0")
+
+    def _get_selected_photo(self):
+        selected = self.photos_tree.selection()
+        if not selected:
+            return None
+        index = int(selected[0])
+        if index < 0 or index >= len(self.latest_photos):
+            return None
+        return self.latest_photos[index]
 
     def _run_in_thread(self, fn, *args):
         thread = threading.Thread(target=fn, args=args, daemon=True)

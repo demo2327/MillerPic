@@ -9,6 +9,7 @@ Simple Windows desktop app for testing your deployed API without Postman.
 - Upload the file to the returned signed S3 URL
 - Call `GET /download/{photoId}` to fetch a signed download URL
 - Call `GET /photos` to list your uploaded photos (with optional pagination token)
+- Select a listed image and open it in your default browser
 
 ## Prerequisites
 
@@ -35,6 +36,7 @@ python app.py
 5. After successful upload, click **Fetch Download URL**.
 6. Copy the returned `downloadUrl` to your browser.
 7. Use **List Photos** to retrieve your photos and paginate with `nextToken`.
+8. Select a row and click **Open Selected Image**.
 
 ## Notes
 

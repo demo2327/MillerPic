@@ -33,6 +33,10 @@ def handler(event, context):
         body = json.loads(event.get("body") or "{}")
         photo_id = body.get("photoId")
         content_type = body.get("contentType", "image/webp")
+        original_file_name = body.get("originalFileName")
+
+        if original_file_name:
+            original_file_name = os.path.basename(str(original_file_name))[:255]
 
         if not photo_id:
             return {
@@ -49,6 +53,7 @@ def handler(event, context):
                 "PhotoId": photo_id,
                 "ObjectKey": object_key,
                 "ContentType": content_type,
+                "OriginalFileName": original_file_name,
                 "CreatedAt": datetime.now(timezone.utc).isoformat()
             }
         )

@@ -105,8 +105,17 @@ def handler(event, context):
             if isinstance(created_at, datetime):
                 created_at = created_at.isoformat()
 
+            file_name = item.get("OriginalFileName")
+            if not file_name:
+                object_key = item.get("ObjectKey") or ""
+                if object_key:
+                    file_name = object_key.rsplit("/", 1)[-1]
+                else:
+                    file_name = item.get("PhotoId")
+
             photos.append({
                 "photoId": item.get("PhotoId"),
+                "fileName": file_name,
                 "objectKey": item.get("ObjectKey"),
                 "contentType": item.get("ContentType"),
                 "createdAt": created_at,
