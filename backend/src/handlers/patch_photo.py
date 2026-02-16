@@ -67,7 +67,7 @@ def handler(event, context):
         email_verified = claims.get("email_verified")
         if isinstance(email_verified, str):
             email_verified = email_verified.lower() == "true"
-        if email_verified is False:
+        if email_verified != True:
             return {
                 "statusCode": 403,
                 "body": json.dumps({"error": "email is not verified"})
@@ -112,15 +112,19 @@ def handler(event, context):
                     "body": json.dumps({"error": "fileName must be a string"})
                 }
             file_name = file_name.strip()
+            if not file_name:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({"error": "fileName cannot be empty"})
+                }
             if len(file_name) > MAX_FILENAME_LENGTH:
                 return {
                     "statusCode": 400,
                     "body": json.dumps({"error": f"fileName exceeds maximum length of {MAX_FILENAME_LENGTH}"})
                 }
-            if file_name:
-                update_parts.append("#fileName = :fileName")
-                expr_names["#fileName"] = "FileName"
-                expr_values[":fileName"] = file_name
+            update_parts.append("#fileName = :fileName")
+            expr_names["#fileName"] = "FileName"
+            expr_values[":fileName"] = file_name
 
         # Validate and add description
         if description is not None:
@@ -130,15 +134,19 @@ def handler(event, context):
                     "body": json.dumps({"error": "description must be a string"})
                 }
             description = description.strip()
+            if not description:
+                return {
+                    "statusCode": 400,
+                    "body": json.dumps({"error": "description cannot be empty"})
+                }
             if len(description) > MAX_DESCRIPTION_LENGTH:
                 return {
                     "statusCode": 400,
                     "body": json.dumps({"error": f"description exceeds maximum length of {MAX_DESCRIPTION_LENGTH}"})
                 }
-            if description:
-                update_parts.append("#description = :description")
-                expr_names["#description"] = "Description"
-                expr_values[":description"] = description
+            update_parts.append("#description = :description")
+            expr_names["#description"] = "Description"
+            expr_values[":description"] = description
 
         # Validate and add subjects
         if subjects is not None:

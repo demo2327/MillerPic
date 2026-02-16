@@ -14,7 +14,7 @@ backend/node_modules/
 **/__pycache__/
 **/*.pyc
 **/.venv/
-**/test_*.py
+backend/src/handlers/test_*.py
 
 # Desktop OAuth local secrets
 desktop-client/google_oauth_client.json
