@@ -67,7 +67,7 @@ def handler(event, context):
         email_verified = claims.get("email_verified")
         if isinstance(email_verified, str):
             email_verified = email_verified.lower() == "true"
-        if email_verified != True:
+        if email_verified is not True:
             return {
                 "statusCode": 403,
                 "body": json.dumps({"error": "email is not verified"})
