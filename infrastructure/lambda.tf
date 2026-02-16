@@ -14,6 +14,12 @@ data "archive_file" "download" {
   output_path = "${path.module}/.artifacts/download.zip"
 }
 
+data "archive_file" "list" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/list.py"
+  output_path = "${path.module}/.artifacts/list.zip"
+}
+
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-role-${var.environment}"
 
@@ -49,7 +55,7 @@ resource "aws_iam_policy" "app_policy" {
       },
       {
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:GetItem"]
+        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query"]
         Resource = aws_dynamodb_table.photos.arn
       }
     ]
@@ -86,6 +92,23 @@ resource "aws_lambda_function" "download" {
   filename      = data.archive_file.download.output_path
 
   source_code_hash = data.archive_file.download.output_base64sha256
+
+  environment {
+    variables = {
+      PHOTO_BUCKET = aws_s3_bucket.photos.bucket
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "list" {
+  function_name = "${var.project_name}-list-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "list.handler"
+  filename      = data.archive_file.list.output_path
+
+  source_code_hash = data.archive_file.list.output_base64sha256
 
   environment {
     variables = {

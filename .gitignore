@@ -10,5 +10,10 @@ infrastructure/bootstrap/.terraform.lock.hcl
 # Node
 backend/node_modules/
 
+# Python
+**/__pycache__/
+**/*.pyc
+**/.venv/
+
 # GCP foundation export (org/billing/account metadata)
 gcp/
