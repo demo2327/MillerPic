@@ -110,11 +110,12 @@ resource "aws_iam_role_policy_attachment" "app_policy_attach" {
 }
 
 resource "aws_lambda_function" "upload" {
-  function_name = "${var.project_name}-upload-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "upload.handler"
-  filename      = data.archive_file.upload.output_path
+  function_name                  = "${var.project_name}-upload-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "upload.handler"
+  filename                       = data.archive_file.upload.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.upload.output_base64sha256
 
@@ -127,28 +128,31 @@ resource "aws_lambda_function" "upload" {
 }
 
 resource "aws_lambda_function" "download" {
-  function_name = "${var.project_name}-download-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "download.handler"
-  filename      = data.archive_file.download.output_path
+  function_name                  = "${var.project_name}-download-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "download.handler"
+  filename                       = data.archive_file.download.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.download.output_base64sha256
 
   environment {
     variables = {
-      PHOTO_BUCKET = aws_s3_bucket.photos.bucket
-      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+      PHOTO_BUCKET             = aws_s3_bucket.photos.bucket
+      PHOTOS_TABLE             = aws_dynamodb_table.photos.name
+      DOWNLOAD_URL_TTL_SECONDS = tostring(var.download_url_ttl_seconds)
     }
   }
 }
 
 resource "aws_lambda_function" "list" {
-  function_name = "${var.project_name}-list-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "list.handler"
-  filename      = data.archive_file.list.output_path
+  function_name                  = "${var.project_name}-list-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "list.handler"
+  filename                       = data.archive_file.list.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.list.output_base64sha256
 
@@ -161,11 +165,12 @@ resource "aws_lambda_function" "list" {
 }
 
 resource "aws_lambda_function" "upload_complete" {
-  function_name = "${var.project_name}-upload-complete-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "upload_complete.handler"
-  filename      = data.archive_file.upload_complete.output_path
+  function_name                  = "${var.project_name}-upload-complete-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "upload_complete.handler"
+  filename                       = data.archive_file.upload_complete.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.upload_complete.output_base64sha256
 
@@ -178,11 +183,12 @@ resource "aws_lambda_function" "upload_complete" {
 }
 
 resource "aws_lambda_function" "delete" {
-  function_name = "${var.project_name}-delete-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "delete.handler"
-  filename      = data.archive_file.delete.output_path
+  function_name                  = "${var.project_name}-delete-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "delete.handler"
+  filename                       = data.archive_file.delete.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.delete.output_base64sha256
 
@@ -195,11 +201,12 @@ resource "aws_lambda_function" "delete" {
 }
 
 resource "aws_lambda_function" "trash" {
-  function_name = "${var.project_name}-trash-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "trash.handler"
-  filename      = data.archive_file.trash.output_path
+  function_name                  = "${var.project_name}-trash-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "trash.handler"
+  filename                       = data.archive_file.trash.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.trash.output_base64sha256
 
@@ -212,11 +219,12 @@ resource "aws_lambda_function" "trash" {
 }
 
 resource "aws_lambda_function" "hard_delete" {
-  function_name = "${var.project_name}-hard-delete-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "hard_delete.handler"
-  filename      = data.archive_file.hard_delete.output_path
+  function_name                  = "${var.project_name}-hard-delete-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "hard_delete.handler"
+  filename                       = data.archive_file.hard_delete.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.hard_delete.output_base64sha256
 
@@ -229,11 +237,12 @@ resource "aws_lambda_function" "hard_delete" {
 }
 
 resource "aws_lambda_function" "patch_photo" {
-  function_name = "${var.project_name}-patch-photo-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "patch_photo.handler"
-  filename      = data.archive_file.patch_photo.output_path
+  function_name                  = "${var.project_name}-patch-photo-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "patch_photo.handler"
+  filename                       = data.archive_file.patch_photo.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.patch_photo.output_base64sha256
 
@@ -245,11 +254,12 @@ resource "aws_lambda_function" "patch_photo" {
 }
 
 resource "aws_lambda_function" "search" {
-  function_name = "${var.project_name}-search-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "search.handler"
-  filename      = data.archive_file.search.output_path
+  function_name                  = "${var.project_name}-search-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "search.handler"
+  filename                       = data.archive_file.search.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.search.output_base64sha256
 
@@ -261,11 +271,12 @@ resource "aws_lambda_function" "search" {
 }
 
 resource "aws_lambda_function" "get_photo" {
-  function_name = "${var.project_name}-get-photo-${var.environment}"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "get_photo.handler"
-  filename      = data.archive_file.get_photo.output_path
+  function_name                  = "${var.project_name}-get-photo-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "get_photo.handler"
+  filename                       = data.archive_file.get_photo.output_path
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.get_photo.output_base64sha256
 
