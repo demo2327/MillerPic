@@ -15,5 +15,8 @@ backend/node_modules/
 **/*.pyc
 **/.venv/
 
+# Desktop OAuth local secrets
+desktop-client/google_oauth_client.json
+
 # GCP foundation export (org/billing/account metadata)
 gcp/

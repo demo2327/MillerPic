@@ -5,13 +5,22 @@ import re
 import threading
 import uuid
 import webbrowser
+from datetime import datetime, timezone
 from tkinter import END, BOTH, LEFT, RIGHT, X, filedialog, messagebox, ttk
 import tkinter as tk
 
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google_auth_oauthlib.flow import InstalledAppFlow
 import requests
 
 
 DEFAULT_API_BASE_URL = "https://09ew2nqn27.execute-api.us-east-1.amazonaws.com"
+DEFAULT_OAUTH_CLIENT_FILE = os.path.join(os.path.dirname(__file__), "google_oauth_client.json")
+GOOGLE_OAUTH_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+]
 
 
 def pretty_json(value):
@@ -26,6 +35,7 @@ class MillerPicDesktopApp:
 
         self.api_base_url_var = tk.StringVar(value=DEFAULT_API_BASE_URL)
         self.id_token_var = tk.StringVar()
+        self.auth_status_var = tk.StringVar(value="Not signed in")
         self.selected_file_var = tk.StringVar()
         self.selected_file_name_var = tk.StringVar()
         self.content_type_var = tk.StringVar(value="image/webp")
@@ -34,6 +44,7 @@ class MillerPicDesktopApp:
         self.list_limit_var = tk.StringVar(value="20")
         self.list_next_token_var = tk.StringVar()
         self.latest_photos = []
+        self.google_credentials = None
 
         self._build_ui()
 
@@ -53,6 +64,12 @@ class MillerPicDesktopApp:
         ttk.Entry(auth_frame, textvariable=self.id_token_var, width=95, show="*").grid(
             row=3, column=0, sticky="ew"
         )
+
+        auth_actions = ttk.Frame(auth_frame)
+        auth_actions.grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(auth_actions, text="Sign in with Google", command=self.on_google_sign_in).pack(side=LEFT)
+        ttk.Button(auth_actions, text="Sign out", command=self.on_google_sign_out).pack(side=LEFT, padx=(8, 0))
+        ttk.Label(auth_actions, textvariable=self.auth_status_var).pack(side=LEFT, padx=(12, 0))
 
         upload_frame = ttk.LabelFrame(container, text="Upload Photo", padding=10)
         upload_frame.pack(fill=X, pady=(12, 0))
@@ -134,6 +151,92 @@ class MillerPicDesktopApp:
         if not self.photo_id_var.get().strip():
             self.photo_id_var.set(value)
 
+    def _oauth_client_file(self):
+        return os.environ.get("MILLERPIC_GOOGLE_OAUTH_CLIENT_FILE") or DEFAULT_OAUTH_CLIENT_FILE
+
+    def on_google_sign_in(self):
+        self._run_in_thread(self._google_sign_in_flow)
+
+    def _google_sign_in_flow(self):
+        client_file = self._oauth_client_file()
+        if not os.path.isfile(client_file):
+            self.root.after(
+                0,
+                lambda: messagebox.showerror(
+                    "Missing OAuth config",
+                    f"Could not find Google OAuth client file:\n{client_file}\n\n"
+                    "Create a Desktop OAuth client in Google Cloud and save the JSON to this path, "
+                    "or set MILLERPIC_GOOGLE_OAUTH_CLIENT_FILE.",
+                ),
+            )
+            return
+
+        try:
+            self.log("Starting Google sign-in flow in browser...")
+            flow = InstalledAppFlow.from_client_secrets_file(client_file, scopes=GOOGLE_OAUTH_SCOPES)
+            credentials = flow.run_local_server(
+                host="localhost",
+                port=0,
+                open_browser=True,
+                authorization_prompt_message="A browser window has been opened for Google sign-in.",
+                success_message="MillerPic authentication complete. You can close this tab.",
+            )
+
+            if not credentials.id_token and credentials.refresh_token:
+                credentials.refresh(GoogleAuthRequest())
+
+            if not credentials.id_token:
+                raise RuntimeError("Google sign-in succeeded but no ID token was returned.")
+
+            self.root.after(0, self._apply_google_credentials, credentials)
+        except Exception as error:
+            self.log(f"Google sign-in failed: {error}")
+            self.root.after(0, lambda: messagebox.showerror("Google sign-in failed", str(error)))
+
+    def _apply_google_credentials(self, credentials):
+        self.google_credentials = credentials
+        self.id_token_var.set(credentials.id_token or "")
+
+        expiry = credentials.expiry
+        if isinstance(expiry, datetime):
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            expiry_text = expiry.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        else:
+            expiry_text = "unknown"
+
+        self.auth_status_var.set(f"Signed in (expires: {expiry_text})")
+        self.log("Google sign-in complete. Token field updated.")
+
+    def on_google_sign_out(self):
+        self.google_credentials = None
+        self.id_token_var.set("")
+        self.auth_status_var.set("Not signed in")
+        self.log("Signed out locally (token cleared).")
+
+    def _refresh_google_token_if_needed(self):
+        credentials = self.google_credentials
+        if not credentials:
+            return
+
+        if not credentials.expired:
+            if credentials.id_token:
+                self.id_token_var.set(credentials.id_token)
+            return
+
+        if not credentials.refresh_token:
+            self.log("Google token expired and no refresh token is available. Please sign in again.")
+            return
+
+        try:
+            credentials.refresh(GoogleAuthRequest())
+            if credentials.id_token:
+                self.id_token_var.set(credentials.id_token)
+            self._apply_google_credentials(credentials)
+            self.log("Refreshed Google token automatically.")
+        except Exception as error:
+            self.log(f"Automatic token refresh failed: {error}")
+
     def on_select_file(self):
         file_path = filedialog.askopenfilename(
             title="Select photo or video",
@@ -157,9 +260,14 @@ class MillerPicDesktopApp:
         self.log(f"Auto-filled photo ID: {self.photo_id_var.get()}")
 
     def _require_auth(self):
+        self._refresh_google_token_if_needed()
+
         token = self.id_token_var.get().strip()
         if not token:
-            messagebox.showerror("Missing token", "Paste your Google ID token before calling the API.")
+            messagebox.showerror(
+                "Missing token",
+                "Sign in with Google or paste your Google ID token before calling the API.",
+            )
             return None
 
         if token.lower().startswith("bearer "):
@@ -427,7 +535,7 @@ class MillerPicDesktopApp:
 def main():
     root = tk.Tk()
     app = MillerPicDesktopApp(root)
-    app.log("Paste your Google ID token and start with Upload Photo.")
+    app.log("Sign in with Google or paste your Google ID token, then start with Upload Photo.")
     root.mainloop()
 
 

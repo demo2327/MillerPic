@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a product or technical improvement
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What do you want to add?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List concrete checks for done.
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security/Cost impact
+      description: Any auth, IAM, data, or cost implications?
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Rollout plan
+      description: Migration, backward compatibility, and rollback notes.

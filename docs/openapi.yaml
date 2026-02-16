@@ -1,0 +1,64 @@
+openapi: 3.0.3
+info:
+  title: MillerPic API (Current Deployed Subset)
+  version: 0.1.0
+servers:
+  - url: https://09ew2nqn27.execute-api.us-east-1.amazonaws.com
+paths:
+  /photos:
+    get:
+      summary: List photos
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: nextToken
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Photo list
+  /photos/upload-url:
+    post:
+      summary: Create upload URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photoId]
+              properties:
+                photoId:
+                  type: string
+                contentType:
+                  type: string
+                originalFileName:
+                  type: string
+      responses:
+        '200':
+          description: Signed upload URL
+  /photos/{photoId}/download-url:
+    get:
+      summary: Create download URL
+      parameters:
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Signed download URL
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - bearerAuth: []

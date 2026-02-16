@@ -1,0 +1,61 @@
+{
+  "servers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}"
+      ]
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-github-server"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
+      }
+    },
+    "aws-devops": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-aws-devops-server"
+      ],
+      "env": {
+        "AWS_PROFILE": "millerpic_tf",
+        "AWS_REGION": "us-east-1"
+      }
+    },
+    "http": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@waleedyousaf07/mcp-http"
+      ]
+    },
+    "openapi": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-openapi-schema-explorer",
+        "${workspaceFolder}/docs/openapi.yaml"
+      ]
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ]
+    }
+  }
+}

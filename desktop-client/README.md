@@ -4,7 +4,7 @@ Simple Windows desktop app for testing your deployed API without Postman.
 
 ## What this does
 
-- Paste your Google ID token once
+- Sign in with Google from the desktop app (or paste token manually)
 - Pick a file and call `POST /upload`
 - Upload the file to the returned signed S3 URL
 - Call `GET /download/{photoId}` to fetch a signed download URL
@@ -15,7 +15,7 @@ Simple Windows desktop app for testing your deployed API without Postman.
 
 - Python 3.10+
 - Deployed backend API
-- Valid Google ID token (`eyJ...`)
+- Google OAuth Desktop client JSON at `desktop-client/google_oauth_client.json`
 
 ## Run
 
@@ -30,7 +30,8 @@ python app.py
 ## Usage
 
 1. Keep API Base URL as your deployed URL (already prefilled).
-2. Paste your Google ID token in the token field.
+2. Click **Sign in with Google** (recommended).
+3. If needed, you can still paste a valid Google ID token manually.
 3. Click **Browse** and choose a photo/video.
 4. Click **Upload Selected File**.
 5. After successful upload, click **Fetch Download URL**.
@@ -44,3 +45,5 @@ python app.py
 - The `Content-Type` sent to signed S3 upload must match what is used in the upload init call.
 - If upload init returns 401/403, your token is missing/expired/not verified.
 - Token field must contain only the raw single-line ID token (`eyJ...`), not `Bearer ...` and not logs.
+- For sign-in setup, create a Google OAuth client of type **Desktop app** and save the downloaded JSON as `desktop-client/google_oauth_client.json`.
+- Optional: set `MILLERPIC_GOOGLE_OAUTH_CLIENT_FILE` to point to a custom OAuth client JSON path.
