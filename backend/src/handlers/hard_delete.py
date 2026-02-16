@@ -2,6 +2,7 @@ import json
 import os
 
 import boto3
+from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
 
 s3 = boto3.client("s3")
@@ -65,13 +66,22 @@ def handler(event, context):
         
         # Delete from S3 if object key exists
         if object_key:
-            try:
-                s3.delete_object(Bucket=PHOTO_BUCKET, Key=object_key)
-            except ClientError as e:
-                error_code = e.response.get("Error", {}).get("Code")
-                # Continue even if object not found in S3 - cleanup metadata
-                if error_code != "404" and error_code != "NoSuchKey":
-                    raise
+            shared_refs = table.scan(
+                FilterExpression=Attr("ObjectKey").eq(object_key) & ~(
+                    Attr("UserId").eq(user_id) & Attr("PhotoId").eq(photo_id)
+                ),
+                ProjectionExpression="UserId, PhotoId",
+            )
+            has_other_references = bool(shared_refs.get("Items"))
+
+            if not has_other_references:
+                try:
+                    s3.delete_object(Bucket=PHOTO_BUCKET, Key=object_key)
+                except ClientError as e:
+                    error_code = e.response.get("Error", {}).get("Code")
+                    # Continue even if object not found in S3 - cleanup metadata
+                    if error_code != "404" and error_code != "NoSuchKey":
+                        raise
         
         # Delete from DynamoDB
         table.delete_item(

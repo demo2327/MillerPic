@@ -43,6 +43,7 @@ python app.py
 9. For folder sync, choose a folder, click **Add Managed Folder**, then click **Run Sync Job**.
 10. Videos detected during sync are marked as skipped and are not uploaded.
 11. Sync uploads add metadata subjects automatically (folder labels + EXIF date/geo when present).
+12. Sync reports duplicate detections and links duplicate content by hash without re-uploading bytes.
 
 ## Notes
 
