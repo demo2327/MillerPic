@@ -134,7 +134,7 @@ def handler(event, context):
             
             if description:
                 photo["description"] = description
-            if subjects:
+            if subjects is not None:  # Include empty arrays
                 photo["subjects"] = subjects
             if taken_at:
                 photo["takenAt"] = taken_at
