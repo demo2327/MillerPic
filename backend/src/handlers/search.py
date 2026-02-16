@@ -11,6 +11,7 @@ dynamodb = boto3.resource("dynamodb")
 PHOTOS_TABLE = os.environ["PHOTOS_TABLE"]
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+QUERY_BATCH_SIZE = 100
 
 
 def _parse_limit(raw_limit):
@@ -108,14 +109,14 @@ def handler(event, context):
             query_args = {
                 "KeyConditionExpression": Key("UserId").eq(user_id),
                 "FilterExpression": Attr("DeletedAt").not_exists(),
-                "Limit": 100,  # Batch size for each query
+                "Limit": QUERY_BATCH_SIZE,
                 "ScanIndexForward": False,
             }
             if last_evaluated_key:
                 if last_evaluated_key.get("UserId") != user_id:
                     return {
                         "statusCode": 400,
-                        "body": json.dumps({"error": "nextToken does not belong to current user"})
+                        "body": json.dumps({"error": "nextToken is invalid"})
                     }
                 query_args["ExclusiveStartKey"] = last_evaluated_key
 
