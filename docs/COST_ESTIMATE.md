@@ -205,6 +205,30 @@ Directional estimate for 100,000 successful uploads (us-east-1 style pricing ass
 
 ---
 
+## Decision Update (2026-02-16) and Cost Direction
+
+### Locked Product Decisions
+- Deduplication scope is global across family users.
+- Geolocation metadata is always stored when present in image metadata.
+- Preview derivatives should be optimized for comfortable 4K display, not original-level fidelity.
+- High-resolution originals may use very slow/cheap storage with retrieval times that can be hours.
+
+### Expected Cost Effects
+- **Global dedupe** should reduce total stored GB and redundant request volume over time, especially for cross-family shared photos.
+- **Mandatory geolocation metadata** has negligible direct storage cost impact (small metadata footprint).
+- **Dual-tier image strategy** shifts cost from hot originals toward:
+  - cheaper archival classes for originals
+  - moderate fast-access storage + request cost for previews
+
+### Practical Modeling Guidance
+- Treat previews as primary interactive workload and size them for 4K-friendly viewing.
+- Treat originals as archival retrieval workload where long restore/download windows are acceptable.
+- Recalculate monthly cost with two buckets of bytes/requests:
+  - preview bytes + preview GET frequency
+  - original bytes + original retrieval frequency
+
+---
+
 ## What You Get
 
 ✅ Full-featured photo app (web + mobile + desktop clients)  

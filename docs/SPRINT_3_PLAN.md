@@ -11,7 +11,7 @@ Turn desktop uploads into a repeatable folder-sync workflow with metadata enrich
 - Output log becomes optional dialog (open on demand, not always visible).
 - Metadata enrichment sends additional `subjects` tokens:
   - Date taken (when EXIF available)
-  - Geolocation token(s) (when EXIF GPS available)
+  - Geolocation token(s) (when EXIF GPS available, always included)
   - Folder hierarchy labels
 
 ## Acceptance Criteria
@@ -22,6 +22,7 @@ Turn desktop uploads into a repeatable folder-sync workflow with metadata enrich
 - Video files are not uploaded and appear as skipped in sync summary.
 - Output dialog can be opened/closed without affecting sync execution.
 - Subjects sent to backend include folder labels and available EXIF metadata.
+- Geolocation metadata is persisted whenever present and cannot be disabled in settings.
 
 ## Out of Scope
 - Backend hard-delete/reconcile behavior for local deletions.
@@ -30,8 +31,12 @@ Turn desktop uploads into a repeatable folder-sync workflow with metadata enrich
 
 ## Risks
 - EXIF parsing variability across file formats/devices.
-- Privacy concerns for geolocation metadata if default behavior is not explicit.
+- Metadata quality variance for GPS precision/format across camera vendors.
 - Folder scans may become slow on very large trees without indexing.
+
+## Policy Locks
+- Deduplication is global (family-wide) and implemented in Sprint 4.
+- Geolocation metadata capture is mandatory when present in source image metadata.
 
 ## Suggested Implementation Order
 1. Managed folder persistence + sync command shell.

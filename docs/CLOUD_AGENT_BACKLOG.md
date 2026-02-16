@@ -55,22 +55,23 @@ Use cloud agents to accelerate delivery while keeping scope small, testable, and
 5. Output panel refactor to optional log dialog.
 
 ### Sprint 4 (Scale + Cost Optimization)
-6. Content-based deduplication design and implementation (hash/fingerprint workflow).
+6. Content-based deduplication design and implementation (hash/fingerprint workflow, global across family users).
 7. Desktop high-scale management view (bulk triage, large-list usability, performant filtering).
 8. Dual-object storage architecture:
-  - original image in lowest-cost acceptable storage tier
-  - preview derivative in fast-access tier for sub-second viewing
+  - original image in lowest-cost acceptable storage tier (slow retrieval acceptable, including hours)
+  - preview derivative in fast-access tier sized for 4K viewing and responsive user experience
 9. Cost/performance benchmark for preview strategy and retrieval SLA.
 
 ### Sprint 5 (Hardening + Policy)
 10. Sync observability and health dashboards (scan stats, upload/error rates, duplicate rate).
 11. Safe reindex/rebuild flow for managed-folder catalogs.
-12. Privacy controls for location metadata extraction (opt-in/opt-out + redaction policy).
+12. Geolocation governance for mandatory metadata capture (retention, visibility, audit).
 
-### Known Constraints / Decisions Needed
-- Dedup scope must be defined (per-user vs global).
-- Preview format/size policy must be defined before cost benchmark lock.
-- Geolocation metadata handling requires explicit privacy default.
+### Decision Locks (2026-02-16)
+- Dedup scope: **global** across family users.
+- Geolocation metadata: store whenever present in image metadata; no disable toggle.
+- Preview policy: optimize for comfortable 4K display, not maximum fidelity.
+- Retrieval policy: high-resolution originals may use very slow/cheap storage (hours acceptable); previews should remain responsive and not painful to open.
 
 ### P0 (Do first)
 
