@@ -63,6 +63,48 @@ paths:
         '404':
           description: Photo not found
   /photos/{photoId}:
+    get:
+      summary: Get photo metadata
+      description: Retrieve metadata for a single owned photo
+      parameters:
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Photo metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photoId:
+                    type: string
+                  fileName:
+                    type: string
+                  objectKey:
+                    type: string
+                  contentType:
+                    type: string
+                  createdAt:
+                    type: string
+                    format: date-time
+                  status:
+                    type: string
+                    enum: [ACTIVE]
+                  description:
+                    type: string
+                  subjects:
+                    type: array
+                    items:
+                      type: string
+                  takenAt:
+                    type: string
+                    format: date-time
+        '404':
+          description: Photo not found
     delete:
       summary: Soft delete a photo
       description: Mark photo as deleted with 60-day retention period

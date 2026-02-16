@@ -56,6 +56,12 @@ data "archive_file" "search" {
   output_path = "${path.module}/.artifacts/search.zip"
 }
 
+data "archive_file" "get_photo" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/get_photo.py"
+  output_path = "${path.module}/.artifacts/get_photo.zip"
+}
+
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-role-${var.environment}"
 
@@ -246,6 +252,22 @@ resource "aws_lambda_function" "search" {
   filename      = data.archive_file.search.output_path
 
   source_code_hash = data.archive_file.search.output_base64sha256
+
+  environment {
+    variables = {
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "get_photo" {
+  function_name = "${var.project_name}-get-photo-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "get_photo.handler"
+  filename      = data.archive_file.get_photo.output_path
+
+  source_code_hash = data.archive_file.get_photo.output_base64sha256
 
   environment {
     variables = {
