@@ -11,6 +11,7 @@ Simple Windows desktop app for testing your deployed API without Postman.
 - Call `GET /photos` to list your uploaded photos (with optional pagination token)
 - Select a listed image and open it in your default browser
 - Persist managed folders and run incremental sync for new image files
+- Auto-populate subjects from folder hierarchy and image EXIF date/geolocation when available
 
 ## Prerequisites
 
@@ -41,6 +42,7 @@ python app.py
 8. Select a row and click **Open Selected Image**.
 9. For folder sync, choose a folder, click **Add Managed Folder**, then click **Run Sync Job**.
 10. Videos detected during sync are marked as skipped and are not uploaded.
+11. Sync uploads add metadata subjects automatically (folder labels + EXIF date/geo when present).
 
 ## Notes
 
