@@ -55,7 +55,10 @@ def _validate_iso_date(date_str):
 def handler(event, context):
     try:
         # Extract JWT claims for authorization
-        claims = (((event.get("requestContext") or {}).get("authorizer") or {}).get("jwt") or {}).get("claims") or {}
+        request_context = event.get("requestContext") or {}
+        authorizer = request_context.get("authorizer") or {}
+        jwt_data = authorizer.get("jwt") or {}
+        claims = jwt_data.get("claims") or {}
         user_id = claims.get("sub")
 
         if not user_id:

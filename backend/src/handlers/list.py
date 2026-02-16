@@ -128,12 +128,16 @@ def handler(event, context):
             }
             
             # Only include optional metadata fields if they have values
-            if item.get("Description"):
-                photo["description"] = item.get("Description")
-            if item.get("Subjects"):
-                photo["subjects"] = item.get("Subjects")
-            if item.get("TakenAt"):
-                photo["takenAt"] = item.get("TakenAt")
+            description = item.get("Description")
+            subjects = item.get("Subjects")
+            taken_at = item.get("TakenAt")
+            
+            if description:
+                photo["description"] = description
+            if subjects:
+                photo["subjects"] = subjects
+            if taken_at:
+                photo["takenAt"] = taken_at
             
             photos.append(photo)
 
