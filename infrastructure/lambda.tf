@@ -20,6 +20,12 @@ data "archive_file" "list" {
   output_path = "${path.module}/.artifacts/list.zip"
 }
 
+data "archive_file" "upload_complete" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/upload_complete.py"
+  output_path = "${path.module}/.artifacts/upload_complete.zip"
+}
+
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-role-${var.environment}"
 
@@ -55,7 +61,7 @@ resource "aws_iam_policy" "app_policy" {
       },
       {
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query"]
+        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem"]
         Resource = aws_dynamodb_table.photos.arn
       }
     ]
@@ -109,6 +115,23 @@ resource "aws_lambda_function" "list" {
   filename      = data.archive_file.list.output_path
 
   source_code_hash = data.archive_file.list.output_base64sha256
+
+  environment {
+    variables = {
+      PHOTO_BUCKET = aws_s3_bucket.photos.bucket
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "upload_complete" {
+  function_name = "${var.project_name}-upload-complete-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "upload_complete.handler"
+  filename      = data.archive_file.upload_complete.output_path
+
+  source_code_hash = data.archive_file.upload_complete.output_base64sha256
 
   environment {
     variables = {

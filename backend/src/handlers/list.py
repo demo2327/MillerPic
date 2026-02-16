@@ -101,6 +101,11 @@ def handler(event, context):
         items = result.get("Items") or []
         photos = []
         for item in items:
+            # Filter out pending photos, but include items without Status for backward compatibility
+            status = item.get("Status")
+            if status and status != "ACTIVE":
+                continue
+            
             created_at = item.get("CreatedAt")
             if isinstance(created_at, datetime):
                 created_at = created_at.isoformat()
@@ -119,6 +124,7 @@ def handler(event, context):
                 "objectKey": item.get("ObjectKey"),
                 "contentType": item.get("ContentType"),
                 "createdAt": created_at,
+                "status": status or "ACTIVE",
             })
 
         new_next_token = _encode_next_token(result.get("LastEvaluatedKey"))
