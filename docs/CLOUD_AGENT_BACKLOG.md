@@ -28,7 +28,9 @@ Use cloud agents to accelerate delivery while keeping scope small, testable, and
 
 - Sprint 1: Complete (issues #11, #12, #14, #26 closed)
 - Sprint 2: Complete (#13, #15, #16 delivered)
-- Closeout reports: `docs/SPRINT_1_CLOSEOUT.md`, `docs/SPRINT_2_CLOSEOUT.md`
+- Sprint 3: Complete (#39, #40, #41 delivered)
+- Sprint 4: Planned (`docs/SPRINT_4_PLAN.md`)
+- Closeout reports: `docs/SPRINT_1_CLOSEOUT.md`, `docs/SPRINT_2_CLOSEOUT.md`, `docs/SPRINT_3_CLOSEOUT.md`
 
 ## User-Driven Rebaseline (Post Sprint 2)
 
@@ -61,6 +63,7 @@ Use cloud agents to accelerate delivery while keeping scope small, testable, and
   - original image in lowest-cost acceptable storage tier (slow retrieval acceptable, including hours)
   - preview derivative in fast-access tier sized for 4K viewing and responsive user experience
 9. Cost/performance benchmark for preview strategy and retrieval SLA.
+10. Implement Checkov for Terraform in CI with documented suppression policy.
 
 ### Sprint 5 (Hardening + Policy)
 10. Sync observability and health dashboards (scan stats, upload/error rates, duplicate rate).
