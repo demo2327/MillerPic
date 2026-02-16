@@ -54,7 +54,8 @@ def handler(event, context):
                 "ObjectKey": object_key,
                 "ContentType": content_type,
                 "OriginalFileName": original_file_name,
-                "CreatedAt": datetime.now(timezone.utc).isoformat()
+                "CreatedAt": datetime.now(timezone.utc).isoformat(),
+                "Status": "PENDING"
             }
         )
 
