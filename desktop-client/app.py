@@ -22,6 +22,10 @@ GOOGLE_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
 
+SUPPORTED_MEDIA_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".mp4", ".mov", ".mkv"
+}
+
 
 def pretty_json(value):
     return json.dumps(value, indent=2, ensure_ascii=False)
@@ -38,6 +42,7 @@ class MillerPicDesktopApp:
         self.auth_status_var = tk.StringVar(value="Not signed in")
         self.selected_file_var = tk.StringVar()
         self.selected_file_name_var = tk.StringVar()
+        self.selected_folder_var = tk.StringVar()
         self.content_type_var = tk.StringVar(value="image/webp")
         self.photo_id_var = tk.StringVar()
         self.download_photo_id_var = tk.StringVar()
@@ -46,6 +51,8 @@ class MillerPicDesktopApp:
         self.search_query_var = tk.StringVar()
         self.search_limit_var = tk.StringVar(value="20")
         self.latest_photos = []
+        self.upload_queue_items = []
+        self.upload_queue_running = False
         self.google_credentials = None
 
         self._build_ui()
@@ -91,6 +98,30 @@ class MillerPicDesktopApp:
         ttk.Entry(input_row, textvariable=self.content_type_var, width=35).grid(row=1, column=1, sticky="w")
 
         ttk.Button(upload_frame, text="Upload Selected File", command=self.on_upload).pack(anchor="w", pady=(10, 0))
+
+        folder_row = ttk.Frame(upload_frame)
+        folder_row.pack(fill=X, pady=(10, 0))
+        ttk.Entry(folder_row, textvariable=self.selected_folder_var).pack(side=LEFT, fill=X, expand=True)
+        ttk.Button(folder_row, text="Browse Folder", command=self.on_select_folder).pack(side=RIGHT, padx=(8, 0))
+
+        queue_actions_row = ttk.Frame(upload_frame)
+        queue_actions_row.pack(fill=X, pady=(8, 0))
+        ttk.Button(queue_actions_row, text="Enqueue Folder Files", command=self.on_enqueue_folder).pack(side=LEFT)
+        ttk.Button(queue_actions_row, text="Run Upload Queue", command=self.on_run_upload_queue).pack(side=LEFT, padx=(8, 0))
+
+        self.queue_tree = ttk.Treeview(
+            upload_frame,
+            columns=("file", "status", "message"),
+            show="headings",
+            height=5,
+        )
+        self.queue_tree.heading("file", text="File")
+        self.queue_tree.heading("status", text="Status")
+        self.queue_tree.heading("message", text="Message")
+        self.queue_tree.column("file", width=260)
+        self.queue_tree.column("status", width=120)
+        self.queue_tree.column("message", width=420)
+        self.queue_tree.pack(fill=X, pady=(8, 0))
 
         download_frame = ttk.LabelFrame(container, text="Get Download URL", padding=10)
         download_frame.pack(fill=X, pady=(12, 0))
@@ -278,6 +309,194 @@ class MillerPicDesktopApp:
         self.log(f"Selected file: {file_path}")
         self.log(f"Auto-filled photo ID: {self.photo_id_var.get()}")
 
+    def on_select_folder(self):
+        folder_path = filedialog.askdirectory(title="Select folder with photos/videos")
+        if not folder_path:
+            return
+        self.selected_folder_var.set(folder_path)
+        self.log(f"Selected folder: {folder_path}")
+
+    def on_enqueue_folder(self):
+        folder_path = self.selected_folder_var.get().strip()
+        if not folder_path:
+            messagebox.showerror("Missing folder", "Select a folder to enqueue media files.")
+            return
+
+        if not os.path.isdir(folder_path):
+            messagebox.showerror("Invalid folder", "Selected folder path does not exist.")
+            return
+
+        queued_count = 0
+        for root_dir, _, files in os.walk(folder_path):
+            for file_name in files:
+                extension = os.path.splitext(file_name)[1].lower()
+                if extension not in SUPPORTED_MEDIA_EXTENSIONS:
+                    continue
+
+                file_path = os.path.join(root_dir, file_name)
+                queue_item = {
+                    "filePath": file_path,
+                    "fileName": file_name,
+                    "photoId": uuid.uuid4().hex,
+                    "status": "QUEUED",
+                    "message": "",
+                }
+                self.upload_queue_items.append(queue_item)
+                self._queue_insert_item(queue_item)
+                queued_count += 1
+
+        if queued_count == 0:
+            self.log("No supported media files found in selected folder.")
+            return
+
+        self.log(f"Queued {queued_count} files for upload.")
+
+    def on_run_upload_queue(self):
+        if self.upload_queue_running:
+            self.log("Upload queue is already running.")
+            return
+
+        headers = self._headers()
+        if not headers:
+            return
+
+        queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
+        if not queued_items:
+            self.log("No queued files to upload.")
+            return
+
+        self.upload_queue_running = True
+        self._run_in_thread(self._run_upload_queue_flow, headers)
+
+    def _queue_insert_item(self, item):
+        file_path = item.get("filePath") or ""
+        file_name = item.get("fileName") or os.path.basename(file_path)
+        item["fileName"] = file_name
+        self.queue_tree.insert(
+            "",
+            "end",
+            iid=item["photoId"],
+            values=(file_name, item.get("status") or "", item.get("message") or ""),
+        )
+
+    def _queue_update_item(self, photo_id, status, message=""):
+        def _apply_update():
+            if not self.queue_tree.exists(photo_id):
+                return
+            current = self.queue_tree.item(photo_id, "values")
+            file_name = current[0] if current else ""
+            self.queue_tree.item(photo_id, values=(file_name, status, message))
+
+        self.root.after(0, _apply_update)
+
+    @staticmethod
+    def _extract_error_message(response_body, fallback_message):
+        if isinstance(response_body, dict):
+            error_text = response_body.get("error")
+            if error_text:
+                return str(error_text)
+            raw_text = response_body.get("raw")
+            if raw_text:
+                return str(raw_text)[:180]
+        return fallback_message
+
+    def _upload_one_file(self, headers, file_path, photo_id, original_file_name, content_type):
+        payload = {
+            "photoId": photo_id,
+            "contentType": content_type,
+            "originalFileName": original_file_name,
+        }
+        upload_init_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-url"
+
+        init_response = requests.post(upload_init_url, headers=headers, json=payload, timeout=30)
+        init_body = self._safe_json(init_response)
+        self.log(f"POST /photos/upload-url -> {init_response.status_code} ({original_file_name})")
+        if init_response.status_code != 200:
+            error_message = self._extract_error_message(init_body, f"upload-init failed ({init_response.status_code})")
+            return False, error_message
+
+        upload_url = init_body.get("uploadUrl")
+        if not upload_url:
+            return False, "uploadUrl missing in response"
+
+        with open(file_path, "rb") as source:
+            put_response = requests.put(
+                upload_url,
+                data=source,
+                headers={"Content-Type": content_type},
+                timeout=180,
+            )
+
+        self.log(f"PUT signed-url -> {put_response.status_code} ({original_file_name})")
+        if put_response.status_code not in (200, 201):
+            return False, f"upload-bytes failed ({put_response.status_code})"
+
+        upload_complete_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-complete"
+        complete_response = requests.post(
+            upload_complete_url,
+            headers=headers,
+            json={"photoId": photo_id},
+            timeout=30,
+        )
+        complete_body = self._safe_json(complete_response)
+        self.log(f"POST /photos/upload-complete -> {complete_response.status_code} ({original_file_name})")
+        if complete_response.status_code != 200:
+            error_message = self._extract_error_message(complete_body, f"upload-complete failed ({complete_response.status_code})")
+            return False, error_message
+
+        return True, "completed"
+
+    def _run_upload_queue_flow(self, headers):
+        queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
+        self.log(f"Starting folder upload queue with {len(queued_items)} files...")
+
+        success_count = 0
+        failed_count = 0
+
+        try:
+            for item in queued_items:
+                file_path = item["filePath"]
+                file_name = item["fileName"]
+                photo_id = item["photoId"]
+
+                item["status"] = "UPLOADING"
+                item["message"] = ""
+                self._queue_update_item(photo_id, "UPLOADING", "")
+
+                guessed_type, _ = mimetypes.guess_type(file_path)
+                content_type = guessed_type or "application/octet-stream"
+
+                try:
+                    ok, message = self._upload_one_file(
+                        headers=headers,
+                        file_path=file_path,
+                        photo_id=photo_id,
+                        original_file_name=file_name,
+                        content_type=content_type,
+                    )
+                    if ok:
+                        item["status"] = "COMPLETED"
+                        item["message"] = "completed"
+                        success_count += 1
+                        self._queue_update_item(photo_id, "COMPLETED", "completed")
+                    else:
+                        item["status"] = "FAILED"
+                        item["message"] = message
+                        failed_count += 1
+                        self._queue_update_item(photo_id, "FAILED", message)
+                        self.log(f"Queue item failed ({file_name}): {message}")
+                except Exception as error:
+                    failed_count += 1
+                    item["status"] = "FAILED"
+                    item["message"] = str(error)
+                    self._queue_update_item(photo_id, "FAILED", str(error))
+                    self.log(f"Queue item failed ({file_name}): {error}")
+
+            self.log(f"Folder upload queue complete. Success: {success_count}, Failed: {failed_count}")
+            self.root.after(0, self.on_list_photos)
+        finally:
+            self.upload_queue_running = False
+
     def _require_auth(self):
         self._refresh_google_token_if_needed()
 
@@ -349,46 +568,21 @@ class MillerPicDesktopApp:
 
     def _upload_flow(self, upload_init_url, headers, payload, file_path, content_type):
         try:
-            self.log("Starting upload init request...")
-            init_response = requests.post(upload_init_url, headers=headers, json=payload, timeout=30)
-            init_body = self._safe_json(init_response)
-            self.log(f"POST /photos/upload-url -> {init_response.status_code}")
-            self.log(pretty_json(init_body))
+            self.log("Starting upload...")
+            ok, message = self._upload_one_file(
+                headers=headers,
+                file_path=file_path,
+                photo_id=payload["photoId"],
+                original_file_name=payload["originalFileName"],
+                content_type=content_type,
+            )
 
-            if init_response.status_code != 200:
-                return
-
-            upload_url = init_body.get("uploadUrl")
-            if not upload_url:
-                self.log("uploadUrl missing in response.")
-                return
-
-            with open(file_path, "rb") as source:
-                self.log("Uploading file to signed URL...")
-                put_response = requests.put(
-                    upload_url,
-                    data=source,
-                    headers={"Content-Type": content_type},
-                    timeout=180,
-                )
-            self.log(f"PUT signed-url -> {put_response.status_code}")
-            if put_response.status_code in (200, 201):
-                self.log("Upload complete to storage.")
+            if ok:
+                self.log("Upload finalized. Refreshing photo list...")
                 self.download_photo_id_var.set(payload["photoId"])
-
-                upload_complete_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-complete"
-                complete_payload = {"photoId": payload["photoId"]}
-                self.log("Finalizing upload metadata...")
-                complete_response = requests.post(upload_complete_url, headers=headers, json=complete_payload, timeout=30)
-                complete_body = self._safe_json(complete_response)
-                self.log(f"POST /photos/upload-complete -> {complete_response.status_code}")
-                self.log(pretty_json(complete_body))
-
-                if complete_response.status_code == 200:
-                    self.log("Upload finalized. Refreshing photo list...")
-                    self.root.after(0, self.on_list_photos)
+                self.root.after(0, self.on_list_photos)
             else:
-                self.log(put_response.text[:2000])
+                self.log(f"Upload failed: {message}")
         except requests.RequestException as error:
             self.log(f"Network error: {error}")
         except Exception as error:
