@@ -201,15 +201,21 @@ def handler(event, context):
             
             updated_item = response.get("Attributes", {})
             
+            # Build response with only non-null fields for consistency with list endpoint
+            result = {"photoId": photo_id}
+            
+            if updated_item.get("FileName"):
+                result["fileName"] = updated_item.get("FileName")
+            if updated_item.get("Description"):
+                result["description"] = updated_item.get("Description")
+            if updated_item.get("Subjects") is not None:  # Allow empty array
+                result["subjects"] = updated_item.get("Subjects")
+            if updated_item.get("TakenAt"):
+                result["takenAt"] = updated_item.get("TakenAt")
+            
             return {
                 "statusCode": 200,
-                "body": json.dumps({
-                    "photoId": photo_id,
-                    "fileName": updated_item.get("FileName"),
-                    "description": updated_item.get("Description"),
-                    "subjects": updated_item.get("Subjects"),
-                    "takenAt": updated_item.get("TakenAt")
-                })
+                "body": json.dumps(result)
             }
         except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
             return {
