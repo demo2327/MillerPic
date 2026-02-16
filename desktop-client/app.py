@@ -43,6 +43,8 @@ class MillerPicDesktopApp:
         self.download_photo_id_var = tk.StringVar()
         self.list_limit_var = tk.StringVar(value="20")
         self.list_next_token_var = tk.StringVar()
+        self.search_query_var = tk.StringVar()
+        self.search_limit_var = tk.StringVar(value="20")
         self.latest_photos = []
         self.google_credentials = None
 
@@ -100,6 +102,23 @@ class MillerPicDesktopApp:
         ttk.Button(download_frame, text="Fetch Download URL", command=self.on_get_download_url).grid(
             row=1, column=1, sticky="w"
         )
+
+        search_frame = ttk.LabelFrame(container, text="Search Photos", padding=10)
+        search_frame.pack(fill=X, pady=(12, 0))
+
+        ttk.Label(search_frame, text="Search Query (filename/subjects)").grid(row=0, column=0, sticky="w")
+        ttk.Entry(search_frame, textvariable=self.search_query_var, width=60).grid(
+            row=1, column=0, sticky="ew", padx=(0, 10)
+        )
+
+        ttk.Label(search_frame, text="Limit").grid(row=0, column=1, sticky="w")
+        ttk.Entry(search_frame, textvariable=self.search_limit_var, width=8).grid(
+            row=1, column=1, sticky="w", padx=(0, 10)
+        )
+
+        ttk.Button(search_frame, text="Search", command=self.on_search_photos).grid(row=1, column=2, sticky="w")
+
+        search_frame.columnconfigure(0, weight=1)
 
         list_frame = ttk.LabelFrame(container, text="List Photos", padding=10)
         list_frame.pack(fill=X, pady=(12, 0))
@@ -485,6 +504,54 @@ class MillerPicDesktopApp:
                     self.log(f"Auto-selected first photoId for download lookup: {first_photo_id}")
             else:
                 self.log("No photos returned for this page.")
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
+    def on_search_photos(self):
+        headers = self._headers()
+        if not headers:
+            return
+
+        query = self.search_query_var.get().strip()
+        if not query:
+            messagebox.showerror("Missing query", "Enter a search query (filename or subjects).")
+            return
+
+        limit_raw = self.search_limit_var.get().strip() or "20"
+        if not limit_raw.isdigit() or int(limit_raw) < 1 or int(limit_raw) > 100:
+            messagebox.showerror("Invalid limit", "Limit must be a number between 1 and 100.")
+            return
+
+        params = {"q": query, "limit": limit_raw}
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos/search"
+        self._run_in_thread(self._search_photos_flow, endpoint, headers, params)
+
+    def _search_photos_flow(self, endpoint, headers, params):
+        try:
+            self.log(f"Searching photos with query: {params.get('q')}...")
+            response = requests.get(endpoint, headers=headers, params=params, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"GET /photos/search -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code != 200:
+                if response.status_code == 404:
+                    self.log("Search endpoint not yet available. Please ensure backend is deployed.")
+                return
+
+            photos = body.get("photos") or []
+            self.root.after(0, self._refresh_photos_table, photos)
+
+            if photos:
+                first_photo_id = photos[0].get("photoId")
+                if first_photo_id:
+                    self.download_photo_id_var.set(first_photo_id)
+                    self.log(f"Auto-selected first photoId for download lookup: {first_photo_id}")
+                self.log(f"Found {len(photos)} matching photos.")
+            else:
+                self.log("No photos found matching the search criteria.")
         except requests.RequestException as error:
             self.log(f"Network error: {error}")
         except Exception as error:
