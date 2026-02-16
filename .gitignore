@@ -9,3 +9,6 @@ infrastructure/bootstrap/.terraform.lock.hcl
 
 # Node
 backend/node_modules/
+
+# GCP foundation export (org/billing/account metadata)
+gcp/

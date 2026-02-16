@@ -102,15 +102,31 @@ resource "aws_iam_user_policy" "terraform_deployer_inline" {
         ]
       },
       {
-        Sid    = "ProjectInfrastructureManagement"
+        Sid    = "ProjectInfrastructureControlPlane"
         Effect = "Allow"
         Action = [
           "apigateway:*",
           "cloudwatch:*",
           "dynamodb:*",
           "events:*",
-          "iam:*",
-          "kms:*",
+          "iam:CreateRole",
+          "iam:DeleteRole",
+          "iam:GetRole",
+          "iam:UpdateAssumeRolePolicy",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:GetRolePolicy",
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy",
+          "iam:CreatePolicy",
+          "iam:DeletePolicy",
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+          "iam:CreatePolicyVersion",
+          "iam:DeletePolicyVersion",
+          "iam:ListPolicyVersions",
           "lambda:*",
           "logs:*",
           "s3:*",

@@ -1,16 +1,16 @@
 locals {
-  lambda_runtime = "nodejs20.x"
+  lambda_runtime = "python3.12"
 }
 
 data "archive_file" "upload" {
   type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/upload.js"
+  source_file = "${path.module}/../backend/src/handlers/upload.py"
   output_path = "${path.module}/.artifacts/upload.zip"
 }
 
 data "archive_file" "download" {
   type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/download.js"
+  source_file = "${path.module}/../backend/src/handlers/download.py"
   output_path = "${path.module}/.artifacts/download.zip"
 }
 

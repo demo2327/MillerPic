@@ -3,6 +3,22 @@ resource "aws_apigatewayv2_api" "http_api" {
   protocol_type = "HTTP"
 }
 
+resource "aws_apigatewayv2_authorizer" "jwt" {
+  count = var.enable_jwt_auth ? 1 : 0
+
+  api_id          = aws_apigatewayv2_api.http_api.id
+  authorizer_type = "JWT"
+  identity_sources = [
+    "$request.header.Authorization"
+  ]
+  name = "${var.project_name}-jwt-authorizer-${var.environment}"
+
+  jwt_configuration {
+    issuer   = var.jwt_issuer
+    audience = var.jwt_audience
+  }
+}
+
 resource "aws_apigatewayv2_integration" "upload" {
   api_id                 = aws_apigatewayv2_api.http_api.id
   integration_type       = "AWS_PROXY"
@@ -20,15 +36,19 @@ resource "aws_apigatewayv2_integration" "download" {
 }
 
 resource "aws_apigatewayv2_route" "upload" {
-  api_id    = aws_apigatewayv2_api.http_api.id
-  route_key = "POST /photos/upload-url"
-  target    = "integrations/${aws_apigatewayv2_integration.upload.id}"
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "POST /photos/upload-url"
+  target             = "integrations/${aws_apigatewayv2_integration.upload.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
 resource "aws_apigatewayv2_route" "download" {
-  api_id    = aws_apigatewayv2_api.http_api.id
-  route_key = "GET /photos/{photoId}/download-url"
-  target    = "integrations/${aws_apigatewayv2_integration.download.id}"
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "GET /photos/{photoId}/download-url"
+  target             = "integrations/${aws_apigatewayv2_integration.download.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
 resource "aws_apigatewayv2_stage" "default" {

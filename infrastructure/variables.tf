@@ -28,6 +28,24 @@ variable "s3_bucket_prefix" {
   default     = "millerpic-photos"
 }
 
+variable "enable_jwt_auth" {
+  description = "Enable API Gateway JWT authorizer on routes"
+  type        = bool
+  default     = false
+}
+
+variable "jwt_issuer" {
+  description = "JWT issuer URL for API authorizer"
+  type        = string
+  default     = "https://example.com/"
+}
+
+variable "jwt_audience" {
+  description = "Allowed JWT audiences for API authorizer"
+  type        = list(string)
+  default     = ["millerpic"]
+}
+
 variable "tags" {
   description = "Default tags applied to all resources"
   type        = map(string)
