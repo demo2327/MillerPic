@@ -76,6 +76,41 @@ Use cloud agents to accelerate delivery while keeping scope small, testable, and
 - Preview policy: optimize for comfortable 4K display, not maximum fidelity.
 - Retrieval policy: high-resolution originals may use very slow/cheap storage (hours acceptable); previews should remain responsive and not painful to open.
 
+## Checkov Security Sprint Sequence (User Priority)
+
+### Next Sprint: Low-Cost Remediations First
+Target checks (budget-safe first wave):
+- `CKV2_AWS_61` (S3 lifecycle configuration)
+- `CKV_AWS_116` (Lambda DLQ)
+- `CKV2_AWS_57` (Secrets Manager rotation)
+
+Success criteria:
+- These controls are remediated with minimal cost impact.
+- Checkov baseline rerun confirms reduced finding count.
+- Cost impact notes are captured in sprint closeout.
+
+### Following Sprint: Controlled Skips + Governance
+Implement explicit, documented skips for:
+- `CKV_AWS_50` (Lambda X-Ray)
+- `CKV_AWS_18` (S3 access logging)
+
+Success criteria:
+- Suppressions are added with clear budget rationale and review owner.
+- Suppression policy is documented in security/deployment docs.
+- CI remains stable and transparent about skipped controls.
+
+### After Those Two Sprints: Revisit Remaining Checks
+Deferred checks to reassess with budget review:
+- `CKV_AWS_117` (Lambda in VPC)
+- `CKV_AWS_272` (Lambda code signing)
+- `CKV_AWS_173` (Lambda env var KMS)
+- `CKV_AWS_144` (S3 replication)
+- `CKV_AWS_145` (S3 KMS-by-default)
+- `CKV2_AWS_62` (S3 event notifications)
+
+Decision gate:
+- Re-evaluate security benefit vs monthly cost impact before implementation.
+
 ### P0 (Do first)
 
 1. Upload finalize flow (`upload-complete`) + pending/active states
