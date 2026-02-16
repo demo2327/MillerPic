@@ -14,6 +14,7 @@ backend/node_modules/
 **/__pycache__/
 **/*.pyc
 **/.venv/
+**/.pytest_cache/
 backend/src/handlers/test_*.py
 
 # Desktop OAuth local secrets
