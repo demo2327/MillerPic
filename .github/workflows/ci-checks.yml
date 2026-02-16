@@ -10,6 +10,8 @@ jobs:
   python-compile:
     name: Python compile checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,9 +26,12 @@ jobs:
       - name: Compile desktop app
         run: python -m py_compile desktop-client/app.py
 
+
   python-backend-tests:
     name: Python backend unit tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,6 +49,8 @@ jobs:
   terraform-checks:
     name: Terraform fmt/validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
