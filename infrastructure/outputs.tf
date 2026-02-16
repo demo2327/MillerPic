@@ -8,6 +8,16 @@ output "photos_table_name" {
   description = "DynamoDB table for photo metadata"
 }
 
+output "users_table_name" {
+  value       = aws_dynamodb_table.users.name
+  description = "DynamoDB table for user data"
+}
+
+output "albums_table_name" {
+  value       = aws_dynamodb_table.albums.name
+  description = "DynamoDB table for album metadata"
+}
+
 output "api_base_url" {
   value       = aws_apigatewayv2_api.http_api.api_endpoint
   description = "HTTP API endpoint"
