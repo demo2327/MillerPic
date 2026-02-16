@@ -10,6 +10,30 @@
 
 ---
 
+## Terraform Static Security Scanning (Checkov)
+
+MillerPic uses Checkov in CI to statically scan Terraform changes.
+
+### Enforcement Model
+- Trigger: runs on pull requests/commits that modify Terraform-related files.
+- Threshold: High/Critical findings fail CI by default.
+- Scope: Terraform under `infrastructure/`, `infrastructure/bootstrap/`, and `gcp/`.
+
+### Local Reproduction
+```bash
+python -m pip install --upgrade pip
+pip install checkov
+checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap -d gcp
+```
+
+### Suppression Policy
+- Suppressions must be explicit inline comments in Terraform:
+  - `#checkov:skip=CKV_AWS_XXX: <reason>`
+- Reason must include business/security context and compensating control when applicable.
+- Suppressions are reviewed in PR like any other security exception.
+
+---
+
 ## Authentication & Authorization
 
 ### Primary Authentication: Google OAuth 2.0

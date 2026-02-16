@@ -1,0 +1,11 @@
+framework:
+  - terraform
+quiet: true
+skip-path:
+  - "**/.terraform/**"
+  - "**/.terraform.lock.hcl"
+  - "**/*.tfstate"
+  - "**/*.tfstate.backup"
+hard-fail-on:
+  - HIGH
+  - CRITICAL
