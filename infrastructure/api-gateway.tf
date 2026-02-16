@@ -59,6 +59,30 @@ resource "aws_apigatewayv2_integration" "patch_photo" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "delete" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.delete.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "trash" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.trash.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "hard_delete" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.hard_delete.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "upload" {
   api_id             = aws_apigatewayv2_api.http_api.id
   route_key          = "POST /photos/upload-url"
@@ -95,6 +119,30 @@ resource "aws_apigatewayv2_route" "patch_photo" {
   api_id             = aws_apigatewayv2_api.http_api.id
   route_key          = "PATCH /photos/{photoId}"
   target             = "integrations/${aws_apigatewayv2_integration.patch_photo.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "delete" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "DELETE /photos/{photoId}"
+  target             = "integrations/${aws_apigatewayv2_integration.delete.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "trash" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "GET /photos/trash"
+  target             = "integrations/${aws_apigatewayv2_integration.trash.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "hard_delete" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "DELETE /photos/{photoId}/hard"
+  target             = "integrations/${aws_apigatewayv2_integration.hard_delete.id}"
   authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
@@ -141,6 +189,30 @@ resource "aws_lambda_permission" "allow_apigw_patch_photo" {
   statement_id  = "AllowAPIGatewayInvokePatchPhoto"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.patch_photo.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_delete" {
+  statement_id  = "AllowAPIGatewayInvokeDelete"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.delete.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_trash" {
+  statement_id  = "AllowAPIGatewayInvokeTrash"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.trash.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_hard_delete" {
+  statement_id  = "AllowAPIGatewayInvokeHardDelete"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.hard_delete.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

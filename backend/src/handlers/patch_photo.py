@@ -126,7 +126,7 @@ def handler(event, context):
                     "body": json.dumps({"error": f"fileName exceeds maximum length of {MAX_FILENAME_LENGTH}"})
                 }
             update_parts.append("#fileName = :fileName")
-            expr_names["#fileName"] = "FileName"
+            expr_names["#fileName"] = "OriginalFileName"
             expr_values[":fileName"] = file_name
 
         # Validate and add description
@@ -204,8 +204,8 @@ def handler(event, context):
             # Build response with only non-null fields for consistency with list endpoint
             result = {"photoId": photo_id}
             
-            if updated_item.get("FileName"):
-                result["fileName"] = updated_item.get("FileName")
+            if updated_item.get("OriginalFileName"):
+                result["fileName"] = updated_item.get("OriginalFileName")
             if updated_item.get("Description"):
                 result["description"] = updated_item.get("Description")
             if updated_item.get("Subjects") is not None:  # Allow empty array

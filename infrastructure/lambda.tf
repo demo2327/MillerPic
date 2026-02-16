@@ -32,6 +32,24 @@ data "archive_file" "patch_photo" {
   output_path = "${path.module}/.artifacts/patch_photo.zip"
 }
 
+data "archive_file" "delete" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/delete.py"
+  output_path = "${path.module}/.artifacts/delete.zip"
+}
+
+data "archive_file" "trash" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/trash.py"
+  output_path = "${path.module}/.artifacts/trash.zip"
+}
+
+data "archive_file" "hard_delete" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/hard_delete.py"
+  output_path = "${path.module}/.artifacts/hard_delete.zip"
+}
+
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-role-${var.environment}"
 
@@ -62,12 +80,12 @@ resource "aws_iam_policy" "app_policy" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject", "s3:HeadObject"]
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:HeadObject", "s3:DeleteObject"]
         Resource = "${aws_s3_bucket.photos.arn}/*"
       },
       {
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem"]
+        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem", "dynamodb:DeleteItem"]
         Resource = aws_dynamodb_table.photos.arn
       }
     ]
@@ -138,6 +156,57 @@ resource "aws_lambda_function" "upload_complete" {
   filename      = data.archive_file.upload_complete.output_path
 
   source_code_hash = data.archive_file.upload_complete.output_base64sha256
+
+  environment {
+    variables = {
+      PHOTO_BUCKET = aws_s3_bucket.photos.bucket
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "delete" {
+  function_name = "${var.project_name}-delete-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "delete.handler"
+  filename      = data.archive_file.delete.output_path
+
+  source_code_hash = data.archive_file.delete.output_base64sha256
+
+  environment {
+    variables = {
+      PHOTO_BUCKET = aws_s3_bucket.photos.bucket
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "trash" {
+  function_name = "${var.project_name}-trash-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "trash.handler"
+  filename      = data.archive_file.trash.output_path
+
+  source_code_hash = data.archive_file.trash.output_base64sha256
+
+  environment {
+    variables = {
+      PHOTO_BUCKET = aws_s3_bucket.photos.bucket
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "hard_delete" {
+  function_name = "${var.project_name}-hard-delete-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "hard_delete.handler"
+  filename      = data.archive_file.hard_delete.output_path
+
+  source_code_hash = data.archive_file.hard_delete.output_base64sha256
 
   environment {
     variables = {

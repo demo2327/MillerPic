@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -85,6 +85,7 @@ def handler(event, context):
 
         query_args = {
             "KeyConditionExpression": Key("UserId").eq(user_id),
+            "FilterExpression": Attr("DeletedAt").not_exists(),
             "Limit": limit,
             "ScanIndexForward": False,
         }
