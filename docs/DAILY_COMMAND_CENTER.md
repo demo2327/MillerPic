@@ -90,6 +90,31 @@ terraform -chdir=infrastructure plan
 gh issue create --repo demo2327/MillerPic --title "Monthly guardrail review - $(Get-Date -Format yyyy-MM)" --body "Checklist run completed. Attach plan summary, threshold verification, and owner sign-off."
 ```
 
+## Monthly Cost Dashboard (Sprint 3)
+
+### Purpose
+- Separate cost growth from image volume growth vs metadata overhead.
+- Validate that video-skip policy is reducing avoidable storage/request cost.
+
+### Metrics to Capture Monthly
+- `sync_images_uploaded`: count of images uploaded by managed-folder sync.
+- `sync_videos_skipped`: count of videos skipped by sync policy.
+- `dynamodb_photo_item_avg_size`: average photo metadata item size (sampled).
+- `s3_total_storage_gb`: total S3 bytes in photos bucket (converted to GB).
+- `s3_put_requests`: monthly S3 PUT request count.
+
+### Review Notes
+- Rising storage with stable upload count suggests larger image sizes or reduced dedupe efficiency.
+- Rising DynamoDB item size with stable upload count suggests metadata expansion.
+- If skipped videos drops unexpectedly, verify sync video policy behavior in desktop client.
+
+### Monthly Cost Review Commands
+```powershell
+aws cloudwatch get-metric-statistics --namespace AWS/S3 --metric-name NumberOfObjects --dimensions Name=BucketName,Value=<photo-bucket>,Name=StorageType,Value=AllStorageTypes --statistics Average --start-time (Get-Date).AddDays(-31).ToUniversalTime().ToString("o") --end-time (Get-Date).ToUniversalTime().ToString("o") --period 86400
+aws cloudwatch get-metric-statistics --namespace AWS/DynamoDB --metric-name ConsumedWriteCapacityUnits --dimensions Name=TableName,Value=<photos-table> --statistics Sum --start-time (Get-Date).AddDays(-31).ToUniversalTime().ToString("o") --end-time (Get-Date).ToUniversalTime().ToString("o") --period 86400
+gh issue create --repo demo2327/MillerPic --title "Monthly Sprint 3 cost dashboard - $(Get-Date -Format yyyy-MM)" --body "Capture: sync_images_uploaded, sync_videos_skipped, dynamodb_photo_item_avg_size, s3_total_storage_gb, s3_put_requests. Include variance vs prior month and actions."
+```
+
 ## End-of-day Notes
 - What shipped: Sprint 1 scope complete; guardrail drift corrected and reapplied.
 - What is next: close Sprint 2 with issue hygiene and closeout notes.
