@@ -1,0 +1,123 @@
+{
+  "info": {
+    "name": "MillerPic API",
+    "description": "Manual API testing collection for MillerPic upload/download URL flow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Upload URL",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{id_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"photoId\": \"{{photo_id}}\",\n  \"contentType\": \"image/webp\"\n}"
+        },
+        "url": {
+          "raw": "{{api_base_url}}/photos/upload-url",
+          "host": [
+            "{{api_base_url}}"
+          ],
+          "path": [
+            "photos",
+            "upload-url"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "const json = pm.response.json();",
+              "pm.collectionVariables.set('upload_url', json.uploadUrl || '');",
+              "pm.test('uploadUrl present', function () {",
+              "  pm.expect(json.uploadUrl).to.be.a('string').and.not.empty;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Download URL",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{id_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{api_base_url}}/photos/{{photo_id}}/download-url",
+          "host": [
+            "{{api_base_url}}"
+          ],
+          "path": [
+            "photos",
+            "{{photo_id}}",
+            "download-url"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "const json = pm.response.json();",
+              "pm.collectionVariables.set('download_url', json.downloadUrl || '');",
+              "pm.test('downloadUrl present', function () {",
+              "  pm.expect(json.downloadUrl).to.be.a('string').and.not.empty;",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "api_base_url",
+      "value": "https://09ew2nqn27.execute-api.us-east-1.amazonaws.com"
+    },
+    {
+      "key": "id_token",
+      "value": ""
+    },
+    {
+      "key": "photo_id",
+      "value": "photo-manual-001"
+    },
+    {
+      "key": "upload_url",
+      "value": ""
+    },
+    {
+      "key": "download_url",
+      "value": ""
+    }
+  ]
+}

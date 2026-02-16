@@ -1,0 +1,6 @@
+Paste this in https://jwt.io if you want to inspect token claims:
+
+- iss should be https://accounts.google.com
+- aud should be 367922653610-kagqhagn7ktigsvuemltqn6cqcvo0pad.apps.googleusercontent.com
+- sub should exist
+- email_verified should be true
