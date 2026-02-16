@@ -119,14 +119,28 @@ def handler(event, context):
                 else:
                     file_name = item.get("PhotoId")
 
-            photos.append({
+            photo = {
                 "photoId": item.get("PhotoId"),
                 "fileName": file_name,
                 "objectKey": item.get("ObjectKey"),
                 "contentType": item.get("ContentType"),
                 "createdAt": created_at,
                 "status": status or "ACTIVE",
-            })
+            }
+            
+            # Only include optional metadata fields if they have values
+            description = item.get("Description")
+            subjects = item.get("Subjects")
+            taken_at = item.get("TakenAt")
+            
+            if description:
+                photo["description"] = description
+            if subjects is not None:  # Include empty arrays
+                photo["subjects"] = subjects
+            if taken_at:
+                photo["takenAt"] = taken_at
+            
+            photos.append(photo)
 
         new_next_token = _encode_next_token(result.get("LastEvaluatedKey"))
 
