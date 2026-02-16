@@ -26,8 +26,12 @@ GOOGLE_OAUTH_SCOPES = [
 SUPPORTED_MEDIA_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".mp4", ".mov", ".mkv"
 }
+SYNC_IMAGE_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"
+}
 MAX_QUEUE_PARALLELISM = 4
 DEFAULT_QUEUE_PARALLELISM = 2
+DEFAULT_DESKTOP_STATE_FILE = os.path.join(os.path.dirname(__file__), "desktop_state.json")
 
 
 def pretty_json(value):
@@ -58,7 +62,11 @@ class MillerPicDesktopApp:
         self.upload_queue_items = []
         self.upload_queue_running = False
         self.upload_queue_lock = threading.Lock()
+        self.managed_folders = []
+        self.synced_files = {}
         self.google_credentials = None
+
+        self._load_local_state()
 
         self._build_ui()
 
@@ -108,6 +116,23 @@ class MillerPicDesktopApp:
         folder_row.pack(fill=X, pady=(10, 0))
         ttk.Entry(folder_row, textvariable=self.selected_folder_var).pack(side=LEFT, fill=X, expand=True)
         ttk.Button(folder_row, text="Browse Folder", command=self.on_select_folder).pack(side=RIGHT, padx=(8, 0))
+
+        managed_actions_row = ttk.Frame(upload_frame)
+        managed_actions_row.pack(fill=X, pady=(8, 0))
+        ttk.Button(managed_actions_row, text="Add Managed Folder", command=self.on_add_managed_folder).pack(side=LEFT)
+        ttk.Button(managed_actions_row, text="Remove Managed Folder", command=self.on_remove_managed_folder).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(managed_actions_row, text="Run Sync Job", command=self.on_run_sync_job).pack(side=LEFT, padx=(8, 0))
+
+        self.managed_folders_tree = ttk.Treeview(
+            upload_frame,
+            columns=("path",),
+            show="headings",
+            height=3,
+        )
+        self.managed_folders_tree.heading("path", text="Managed Folders")
+        self.managed_folders_tree.column("path", width=820)
+        self.managed_folders_tree.pack(fill=X, pady=(8, 0))
+        self._refresh_managed_folders_tree()
 
         queue_actions_row = ttk.Frame(upload_frame)
         queue_actions_row.pack(fill=X, pady=(8, 0))
@@ -328,6 +353,191 @@ class MillerPicDesktopApp:
         self.selected_folder_var.set(folder_path)
         self.log(f"Selected folder: {folder_path}")
 
+    def _desktop_state_file_path(self):
+        return os.environ.get("MILLERPIC_DESKTOP_STATE_FILE") or DEFAULT_DESKTOP_STATE_FILE
+
+    @staticmethod
+    def _normalize_path(path_value):
+        return os.path.normcase(os.path.normpath(os.path.abspath(path_value)))
+
+    @staticmethod
+    def _build_file_signature(file_path):
+        try:
+            stats = os.stat(file_path)
+            return f"{stats.st_size}:{stats.st_mtime_ns}"
+        except OSError:
+            return None
+
+    @staticmethod
+    def _is_sync_image_file(file_name):
+        extension = os.path.splitext(file_name)[1].lower()
+        return extension in SYNC_IMAGE_EXTENSIONS
+
+    def _load_local_state(self):
+        state_path = self._desktop_state_file_path()
+        if not os.path.isfile(state_path):
+            return
+
+        try:
+            with open(state_path, "r", encoding="utf-8") as state_file:
+                data = json.load(state_file)
+        except Exception as error:
+            print(f"Could not load desktop state: {error}")
+            return
+
+        folders = data.get("managedFolders") or []
+        managed = []
+        for folder in folders:
+            if not isinstance(folder, str):
+                continue
+            if not os.path.isdir(folder):
+                continue
+            managed.append(self._normalize_path(folder))
+
+        synced_files = data.get("syncedFiles")
+        if not isinstance(synced_files, dict):
+            synced_files = {}
+
+        self.managed_folders = sorted(set(managed))
+        self.synced_files = synced_files
+
+    def _save_local_state(self):
+        payload = {
+            "managedFolders": self.managed_folders,
+            "syncedFiles": self.synced_files,
+        }
+        state_path = self._desktop_state_file_path()
+        try:
+            with open(state_path, "w", encoding="utf-8") as state_file:
+                json.dump(payload, state_file, indent=2, ensure_ascii=False)
+        except Exception as error:
+            self.log(f"Could not save desktop state: {error}")
+
+    def _refresh_managed_folders_tree(self):
+        for row_id in self.managed_folders_tree.get_children():
+            self.managed_folders_tree.delete(row_id)
+
+        for index, folder_path in enumerate(self.managed_folders):
+            self.managed_folders_tree.insert("", "end", iid=f"folder-{index}", values=(folder_path,))
+
+    def on_add_managed_folder(self):
+        folder_path = self.selected_folder_var.get().strip()
+        if not folder_path:
+            messagebox.showerror("Missing folder", "Select a folder before adding it as managed.")
+            return
+
+        if not os.path.isdir(folder_path):
+            messagebox.showerror("Invalid folder", "Selected folder path does not exist.")
+            return
+
+        normalized_folder = self._normalize_path(folder_path)
+        if normalized_folder in self.managed_folders:
+            self.log(f"Folder already managed: {normalized_folder}")
+            return
+
+        self.managed_folders.append(normalized_folder)
+        self.managed_folders.sort()
+        self._refresh_managed_folders_tree()
+        self._save_local_state()
+        self.log(f"Added managed folder: {normalized_folder}")
+
+    def on_remove_managed_folder(self):
+        selected = self.managed_folders_tree.selection()
+        if not selected:
+            messagebox.showerror("No selection", "Select a managed folder row to remove.")
+            return
+
+        selected_id = selected[0]
+        values = self.managed_folders_tree.item(selected_id, "values")
+        if not values:
+            return
+        folder_path = values[0]
+
+        self.managed_folders = [folder for folder in self.managed_folders if folder != folder_path]
+        self._refresh_managed_folders_tree()
+        self._save_local_state()
+        self.log(f"Removed managed folder: {folder_path}")
+
+    def _queue_has_path(self, path_key):
+        for item in self.upload_queue_items:
+            if item.get("pathKey") != path_key:
+                continue
+            if item.get("status") in {"QUEUED", "UPLOADING"}:
+                return True
+        return False
+
+    def on_run_sync_job(self):
+        headers = self._headers()
+        if not headers:
+            return
+
+        if self.upload_queue_running:
+            self.log("Upload queue is already running.")
+            return
+
+        if not self.managed_folders:
+            messagebox.showerror("No managed folders", "Add at least one managed folder before running sync.")
+            return
+
+        added_count = 0
+        skipped_known_count = 0
+        missing_folder_count = 0
+
+        for managed_folder in self.managed_folders:
+            if not os.path.isdir(managed_folder):
+                missing_folder_count += 1
+                self.log(f"Managed folder not found, skipping: {managed_folder}")
+                continue
+
+            for root_dir, _, files in os.walk(managed_folder):
+                for file_name in files:
+                    if not self._is_sync_image_file(file_name):
+                        continue
+
+                    file_path = os.path.join(root_dir, file_name)
+                    path_key = self._normalize_path(file_path)
+                    signature = self._build_file_signature(file_path)
+                    if not signature:
+                        continue
+
+                    known_entry = self.synced_files.get(path_key)
+                    if known_entry and known_entry.get("signature") == signature:
+                        skipped_known_count += 1
+                        continue
+
+                    if self._queue_has_path(path_key):
+                        continue
+
+                    queue_item = {
+                        "filePath": file_path,
+                        "fileName": file_name,
+                        "photoId": uuid.uuid4().hex,
+                        "status": "QUEUED",
+                        "message": "sync-new",
+                        "pathKey": path_key,
+                        "signature": signature,
+                    }
+                    self.upload_queue_items.append(queue_item)
+                    self._queue_insert_item(queue_item)
+                    added_count += 1
+
+        self.log(
+            "Sync scan complete. "
+            f"Queued new files: {added_count}, Already synced: {skipped_known_count}, Missing folders: {missing_folder_count}"
+        )
+
+        queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
+        if not queued_items:
+            self.log("No queued files to upload after sync scan.")
+            return
+
+        max_parallel = self._get_queue_parallelism()
+        if max_parallel is None:
+            return
+
+        self.upload_queue_running = True
+        self._run_in_thread(self._run_upload_queue_flow, headers, max_parallel)
+
     def on_enqueue_folder(self):
         folder_path = self.selected_folder_var.get().strip()
         if not folder_path:
@@ -352,6 +562,8 @@ class MillerPicDesktopApp:
                     "photoId": uuid.uuid4().hex,
                     "status": "QUEUED",
                     "message": "",
+                    "pathKey": self._normalize_path(file_path),
+                    "signature": self._build_file_signature(file_path),
                 }
                 self.upload_queue_items.append(queue_item)
                 self._queue_insert_item(queue_item)
@@ -565,6 +777,14 @@ class MillerPicDesktopApp:
                                 item["status"] = "COMPLETED"
                                 item["message"] = "completed"
                                 stats["success"] += 1
+                                path_key = item.get("pathKey")
+                                signature = item.get("signature")
+                                if path_key and signature:
+                                    self.synced_files[path_key] = {
+                                        "signature": signature,
+                                        "photoId": photo_id,
+                                        "uploadedAt": datetime.now(timezone.utc).isoformat(),
+                                    }
                                 status = "COMPLETED"
                                 status_message = "completed"
                             else:
@@ -594,6 +814,7 @@ class MillerPicDesktopApp:
                 "Folder upload queue complete. "
                 f"Success: {stats['success']}, Failed: {stats['failed']}, Cancelled: {stats['cancelled']}"
             )
+            self._save_local_state()
             self.root.after(0, self.on_list_photos)
         finally:
             self.upload_queue_running = False
