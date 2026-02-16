@@ -227,6 +227,12 @@ Directional estimate for 100,000 successful uploads (us-east-1 style pricing ass
   - preview bytes + preview GET frequency
   - original bytes + original retrieval frequency
 
+### Dual-Tier Recommendation (Sprint 4)
+- Use preview-first reads for normal browsing/open-image paths.
+- Keep original retrieval for explicit download/export workflows.
+- Roll out additively (preview generation first, then read-path switch, then lifecycle tightening).
+- See [DUAL_TIER_STORAGE_STRATEGY.md](DUAL_TIER_STORAGE_STRATEGY.md) for architecture and rollback phases.
+
 ---
 
 ## Sprint 3 Incremental Cost Impact Review
