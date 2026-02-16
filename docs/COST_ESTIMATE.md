@@ -201,8 +201,6 @@ All for **$94/month**, which is 79% cheaper than unoptimized cloud storage.
 3. Implement WebP compression Lambda
 4. Test Intelligent-Tiering transitions
 5. Deploy and monitor first month
-
-  tiering {
     access_tier = "ARCHIVE_ACCESS"
     days        = 90  # Move to cheaper tier after 3 months
   }
