@@ -50,6 +50,12 @@ data "archive_file" "hard_delete" {
   output_path = "${path.module}/.artifacts/hard_delete.zip"
 }
 
+data "archive_file" "search" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/search.py"
+  output_path = "${path.module}/.artifacts/search.zip"
+}
+
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-role-${var.environment}"
 
@@ -224,6 +230,22 @@ resource "aws_lambda_function" "patch_photo" {
   filename      = data.archive_file.patch_photo.output_path
 
   source_code_hash = data.archive_file.patch_photo.output_base64sha256
+
+  environment {
+    variables = {
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "search" {
+  function_name = "${var.project_name}-search-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "search.handler"
+  filename      = data.archive_file.search.output_path
+
+  source_code_hash = data.archive_file.search.output_base64sha256
 
   environment {
     variables = {
