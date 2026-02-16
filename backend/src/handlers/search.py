@@ -130,9 +130,17 @@ def handler(event, context):
                 if status and status != "ACTIVE":
                     continue
                 
-                # Case-insensitive search in OriginalFileName
-                file_name = item.get("OriginalFileName", "")
+                file_name = item.get("OriginalFileName")
+                if not file_name:
+                    object_key = item.get("ObjectKey") or ""
+                    if object_key:
+                        file_name = object_key.rsplit("/", 1)[-1]
+                    else:
+                        file_name = item.get("PhotoId")
+
                 file_name_match = search_lower in file_name.lower() if file_name else False
+                photo_id = item.get("PhotoId") or ""
+                photo_id_match = search_lower in photo_id.lower()
                 
                 # Case-insensitive search in Subjects (list of strings)
                 subjects = item.get("Subjects", [])
@@ -144,19 +152,12 @@ def handler(event, context):
                             break
                 
                 # Skip if no match
-                if not file_name_match and not subjects_match:
+                if not file_name_match and not subjects_match and not photo_id_match:
                     continue
                 
                 created_at = item.get("CreatedAt")
                 if isinstance(created_at, datetime):
                     created_at = created_at.isoformat()
-
-                if not file_name:
-                    object_key = item.get("ObjectKey") or ""
-                    if object_key:
-                        file_name = object_key.rsplit("/", 1)[-1]
-                    else:
-                        file_name = item.get("PhotoId")
 
                 photo = {
                     "photoId": item.get("PhotoId"),
