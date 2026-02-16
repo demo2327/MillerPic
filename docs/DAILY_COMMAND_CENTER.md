@@ -1,12 +1,12 @@
 # Daily Command Center
 
 ## Today’s Top 3 Outcomes
-- [x] Sprint 1 merged end-to-end (API search/detail, desktop search UI, tests)
-- [x] Guardrails restored and deployed (throttle, concurrency, budgets, alarms)
-- [x] Sensitive config moved to Secrets Manager data-source flow
+- [x] Sprint 3 rebaseline scope completed (#39, #40, #41 closed)
+- [x] Managed-folder sync + video-skip policy shipped in desktop client
+- [x] Auto-subject enrichment shipped (folder labels + EXIF date/geolocation)
 
 ## In Progress
-- Sprint 2 docs hardening: ops playbook integration and monthly guardrail checklist
+- Sprint 4 planning and sequencing (global dedupe, scalable library view, dual-tier storage)
 
 ## Blockers
 - None
@@ -20,8 +20,8 @@ terraform -chdir=infrastructure validate
 ```
 
 ## PRs / Issues Today
-- Issues closed in Sprint 1: #11, #12, #14, #26
-- PRs merged: #27, #28, #29, #30, #31
+- Issues closed in Sprint 3: #39, #40, #41
+- Recent PRs merged: #47, #48, #49, #50, #51
 
 ## Incident Cheat-Sheet (Rollback-Safe)
 
@@ -116,5 +116,5 @@ gh issue create --repo demo2327/MillerPic --title "Monthly Sprint 3 cost dashboa
 ```
 
 ## End-of-day Notes
-- What shipped: Sprint 1 scope complete; guardrail drift corrected and reapplied.
-- What is next: close Sprint 2 with issue hygiene and closeout notes.
+- What shipped: Sprint 3 user-sync foundation complete, plus Sprint 3 cost-impact docs.
+- What is next: execute Sprint 4 architecture and implementation tasks.
