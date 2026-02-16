@@ -10,6 +10,7 @@ Simple Windows desktop app for testing your deployed API without Postman.
 - Call `GET /download/{photoId}` to fetch a signed download URL
 - Call `GET /photos` to list your uploaded photos (with optional pagination token)
 - Select a listed image and open it in your default browser
+- Persist managed folders and run incremental sync for new image files
 
 ## Prerequisites
 
@@ -38,6 +39,7 @@ python app.py
 6. Copy the returned `downloadUrl` to your browser.
 7. Use **List Photos** to retrieve your photos and paginate with `nextToken`.
 8. Select a row and click **Open Selected Image**.
+9. For folder sync, choose a folder, click **Add Managed Folder**, then click **Run Sync Job**.
 
 ## Notes
 
@@ -47,3 +49,4 @@ python app.py
 - Token field must contain only the raw single-line ID token (`eyJ...`), not `Bearer ...` and not logs.
 - For sign-in setup, create a Google OAuth client of type **Desktop app** and save the downloaded JSON as `desktop-client/google_oauth_client.json`.
 - Optional: set `MILLERPIC_GOOGLE_OAUTH_CLIENT_FILE` to point to a custom OAuth client JSON path.
+- Optional: set `MILLERPIC_DESKTOP_STATE_FILE` to customize where managed-folder sync state is stored.
