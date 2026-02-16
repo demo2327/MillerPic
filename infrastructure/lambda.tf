@@ -26,6 +26,12 @@ data "archive_file" "upload_complete" {
   output_path = "${path.module}/.artifacts/upload_complete.zip"
 }
 
+data "archive_file" "patch_photo" {
+  type        = "zip"
+  source_file = "${path.module}/../backend/src/handlers/patch_photo.py"
+  output_path = "${path.module}/.artifacts/patch_photo.zip"
+}
+
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-role-${var.environment}"
 
@@ -136,6 +142,22 @@ resource "aws_lambda_function" "upload_complete" {
   environment {
     variables = {
       PHOTO_BUCKET = aws_s3_bucket.photos.bucket
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "patch_photo" {
+  function_name = "${var.project_name}-patch-photo-${var.environment}"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = local.lambda_runtime
+  handler       = "patch_photo.handler"
+  filename      = data.archive_file.patch_photo.output_path
+
+  source_code_hash = data.archive_file.patch_photo.output_base64sha256
+
+  environment {
+    variables = {
       PHOTOS_TABLE = aws_dynamodb_table.photos.name
     }
   }

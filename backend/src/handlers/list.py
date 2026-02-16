@@ -125,6 +125,9 @@ def handler(event, context):
                 "contentType": item.get("ContentType"),
                 "createdAt": created_at,
                 "status": status or "ACTIVE",
+                "description": item.get("Description"),
+                "subjects": item.get("Subjects"),
+                "takenAt": item.get("TakenAt"),
             })
 
         new_next_token = _encode_next_token(result.get("LastEvaluatedKey"))
