@@ -34,6 +34,14 @@ Turn desktop uploads into a repeatable folder-sync workflow with metadata enrich
 - Metadata quality variance for GPS precision/format across camera vendors.
 - Folder scans may become slow on very large trees without indexing.
 
+## Cost Impact (Sprint 3)
+- Fixed AWS baseline: no major change expected (no new always-on services in scope).
+- Variable cost direction:
+  - image sync automation may increase successful image upload volume,
+  - video skip policy should reduce storage/request growth from large media,
+  - metadata enrichment adds small DynamoDB item-size overhead.
+- Overall expectation: storage and upload volume remain primary cost drivers; metadata overhead is secondary.
+
 ## Policy Locks
 - Deduplication is global (family-wide) and implemented in Sprint 4.
 - Geolocation metadata capture is mandatory when present in source image metadata.

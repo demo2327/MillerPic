@@ -229,6 +229,42 @@ Directional estimate for 100,000 successful uploads (us-east-1 style pricing ass
 
 ---
 
+## Sprint 3 Incremental Cost Impact Review
+
+Sprint 3 delivered managed-folder sync foundation, video-skip policy, and automatic subject enrichment (#39, #41, #40). These changes primarily affect variable request/storage patterns and do not add always-on infrastructure.
+
+### Fixed baseline impact
+- No new always-on AWS services were introduced.
+- Fixed monthly baseline remains approximately unchanged.
+
+### Variable-cost impact by shipped feature
+- **Managed-folder incremental sync (#39):**
+  - Can increase successful upload count because sync runs repeatedly as new files are discovered.
+  - Each successful image still follows existing metered flow: upload-init API + S3 PUT + upload-complete API.
+- **Video skip policy (#41):**
+  - Reduces variable cost growth by preventing video uploads in sync jobs.
+  - Avoids large-object S3 storage and PUT/request charges for skipped videos.
+- **Subject enrichment (#40):**
+  - Adds lightweight metadata (`Subjects`) to photo rows.
+  - Slightly increases DynamoDB item size; write/read cost can increase if item size crosses pricing boundaries.
+  - Geolocation/date/folder labels remain small compared to image-storage costs.
+
+### Net practical conclusion
+- Sprint 3 cost impact is still dominated by image upload volume and stored bytes, not control-plane logic.
+- Compared with pre-Sprint-3 behavior:
+  - costs may rise from higher image-sync throughput,
+  - costs may drop from video suppression,
+  - metadata overhead is typically minor.
+
+### Monitoring adjustments after Sprint 3
+- Track monthly counts for:
+  - sync-discovered images uploaded,
+  - videos skipped by policy,
+  - average DynamoDB item size for photo metadata.
+- Use these counters to separate growth due to real image intake vs metadata overhead.
+
+---
+
 ## What You Get
 
 ✅ Full-featured photo app (web + mobile + desktop clients)  
