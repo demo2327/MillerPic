@@ -1,4 +1,5 @@
 import json
+import hashlib
 import mimetypes
 import os
 import re
@@ -378,6 +379,20 @@ class MillerPicDesktopApp:
             return None
 
     @staticmethod
+    def _compute_content_hash(file_path):
+        digest = hashlib.sha256()
+        try:
+            with open(file_path, "rb") as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            return digest.hexdigest()
+        except OSError:
+            return None
+
+    @staticmethod
     def _is_sync_image_file(file_name):
         extension = os.path.splitext(file_name)[1].lower()
         return extension in SYNC_IMAGE_EXTENSIONS
@@ -617,7 +632,9 @@ class MillerPicDesktopApp:
         added_count = 0
         skipped_known_count = 0
         skipped_video_count = 0
+        duplicate_candidate_count = 0
         missing_folder_count = 0
+        seen_hashes_this_scan = set()
 
         for managed_folder in self.managed_folders:
             if not os.path.isdir(managed_folder):
@@ -659,10 +676,18 @@ class MillerPicDesktopApp:
                     if not signature:
                         continue
 
+                    content_hash = self._compute_content_hash(file_path)
+                    if not content_hash:
+                        continue
+
                     known_entry = self.synced_files.get(path_key)
                     if known_entry and known_entry.get("signature") == signature:
                         skipped_known_count += 1
                         continue
+
+                    if content_hash in seen_hashes_this_scan:
+                        duplicate_candidate_count += 1
+                    seen_hashes_this_scan.add(content_hash)
 
                     if self._queue_has_path(path_key):
                         continue
@@ -675,6 +700,7 @@ class MillerPicDesktopApp:
                         "message": "sync-new",
                         "pathKey": path_key,
                         "signature": signature,
+                        "contentHash": content_hash,
                         "subjects": self._build_subjects_for_file(file_path, managed_folder),
                     }
                     self.upload_queue_items.append(queue_item)
@@ -684,7 +710,8 @@ class MillerPicDesktopApp:
         self.log(
             "Sync scan complete. "
             f"Queued new files: {added_count}, Already synced: {skipped_known_count}, "
-            f"Skipped videos: {skipped_video_count}, Missing folders: {missing_folder_count}"
+            f"Skipped videos: {skipped_video_count}, Duplicate candidates: {duplicate_candidate_count}, "
+            f"Missing folders: {missing_folder_count}"
         )
 
         queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
@@ -695,6 +722,10 @@ class MillerPicDesktopApp:
         max_parallel = self._get_queue_parallelism()
         if max_parallel is None:
             return
+
+        if duplicate_candidate_count > 0 and max_parallel > 1:
+            self.log("Duplicate candidates detected; running sync queue in serial mode for deterministic dedupe linking.")
+            max_parallel = 1
 
         self.upload_queue_running = True
         self._run_in_thread(self._run_upload_queue_flow, headers, max_parallel)
@@ -725,6 +756,7 @@ class MillerPicDesktopApp:
                     "message": "",
                     "pathKey": self._normalize_path(file_path),
                     "signature": self._build_file_signature(file_path),
+                    "contentHash": self._compute_content_hash(file_path),
                     "subjects": self._build_subjects_for_file(file_path, folder_path),
                 }
                 self.upload_queue_items.append(queue_item)
@@ -843,7 +875,7 @@ class MillerPicDesktopApp:
                 return str(raw_text)[:180]
         return fallback_message
 
-    def _upload_one_file(self, headers, file_path, photo_id, original_file_name, content_type, subjects=None):
+    def _upload_one_file(self, headers, file_path, photo_id, original_file_name, content_type, subjects=None, content_hash=None):
         payload = {
             "photoId": photo_id,
             "contentType": content_type,
@@ -851,6 +883,8 @@ class MillerPicDesktopApp:
         }
         if subjects:
             payload["subjects"] = subjects
+        if content_hash:
+            payload["contentHash"] = content_hash
         upload_init_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-url"
 
         init_response = requests.post(upload_init_url, headers=headers, json=payload, timeout=30)
@@ -858,11 +892,15 @@ class MillerPicDesktopApp:
         self.log(f"POST /photos/upload-url -> {init_response.status_code} ({original_file_name})")
         if init_response.status_code != 200:
             error_message = self._extract_error_message(init_body, f"upload-init failed ({init_response.status_code})")
-            return False, error_message
+            return False, error_message, False
+
+        upload_required = init_body.get("uploadRequired")
+        if upload_required is False:
+            return True, "deduplicated-link", True
 
         upload_url = init_body.get("uploadUrl")
         if not upload_url:
-            return False, "uploadUrl missing in response"
+            return False, "uploadUrl missing in response", False
 
         with open(file_path, "rb") as source:
             put_response = requests.put(
@@ -874,7 +912,7 @@ class MillerPicDesktopApp:
 
         self.log(f"PUT signed-url -> {put_response.status_code} ({original_file_name})")
         if put_response.status_code not in (200, 201):
-            return False, f"upload-bytes failed ({put_response.status_code})"
+            return False, f"upload-bytes failed ({put_response.status_code})", False
 
         upload_complete_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-complete"
         complete_response = requests.post(
@@ -887,9 +925,9 @@ class MillerPicDesktopApp:
         self.log(f"POST /photos/upload-complete -> {complete_response.status_code} ({original_file_name})")
         if complete_response.status_code != 200:
             error_message = self._extract_error_message(complete_body, f"upload-complete failed ({complete_response.status_code})")
-            return False, error_message
+            return False, error_message, False
 
-        return True, "completed"
+        return True, "completed", False
 
     def _run_upload_queue_flow(self, headers, max_parallel):
         queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
@@ -899,6 +937,7 @@ class MillerPicDesktopApp:
             "success": 0,
             "failed": 0,
             "cancelled": 0,
+            "deduplicated": 0,
         }
 
         pending_items = list(queued_items)
@@ -929,29 +968,34 @@ class MillerPicDesktopApp:
                     content_type = guessed_type or "application/octet-stream"
 
                     try:
-                        ok, message = self._upload_one_file(
+                        ok, message, deduplicated = self._upload_one_file(
                             headers=headers,
                             file_path=file_path,
                             photo_id=photo_id,
                             original_file_name=file_name,
                             content_type=content_type,
                             subjects=item.get("subjects"),
+                            content_hash=item.get("contentHash"),
                         )
                         with self.upload_queue_lock:
                             if ok:
                                 item["status"] = "COMPLETED"
-                                item["message"] = "completed"
+                                item["message"] = message
                                 stats["success"] += 1
+                                if deduplicated:
+                                    stats["deduplicated"] += 1
                                 path_key = item.get("pathKey")
                                 signature = item.get("signature")
+                                content_hash = item.get("contentHash")
                                 if path_key and signature:
                                     self.synced_files[path_key] = {
                                         "signature": signature,
+                                        "contentHash": content_hash,
                                         "photoId": photo_id,
                                         "uploadedAt": datetime.now(timezone.utc).isoformat(),
                                     }
                                 status = "COMPLETED"
-                                status_message = "completed"
+                                status_message = message
                             else:
                                 item["status"] = "FAILED"
                                 item["message"] = message
@@ -977,7 +1021,8 @@ class MillerPicDesktopApp:
 
             self.log(
                 "Folder upload queue complete. "
-                f"Success: {stats['success']}, Failed: {stats['failed']}, Cancelled: {stats['cancelled']}"
+                f"Success: {stats['success']}, Failed: {stats['failed']}, "
+                f"Deduplicated: {stats['deduplicated']}, Cancelled: {stats['cancelled']}"
             )
             self._save_local_state()
             self.root.after(0, self.on_list_photos)
@@ -1048,6 +1093,7 @@ class MillerPicDesktopApp:
             "photoId": photo_id,
             "contentType": content_type,
             "originalFileName": self.selected_file_name_var.get().strip() or os.path.basename(file_path),
+            "contentHash": self._compute_content_hash(file_path),
             "subjects": self._build_subjects_for_file(file_path),
         }
         upload_init_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-url"
@@ -1057,17 +1103,21 @@ class MillerPicDesktopApp:
     def _upload_flow(self, upload_init_url, headers, payload, file_path, content_type):
         try:
             self.log("Starting upload...")
-            ok, message = self._upload_one_file(
+            ok, message, deduplicated = self._upload_one_file(
                 headers=headers,
                 file_path=file_path,
                 photo_id=payload["photoId"],
                 original_file_name=payload["originalFileName"],
                 content_type=content_type,
                 subjects=payload.get("subjects"),
+                content_hash=payload.get("contentHash"),
             )
 
             if ok:
-                self.log("Upload finalized. Refreshing photo list...")
+                if deduplicated:
+                    self.log("Upload linked to existing content hash (deduplicated). Refreshing photo list...")
+                else:
+                    self.log("Upload finalized. Refreshing photo list...")
                 self.download_photo_id_var.set(payload["photoId"])
                 self.root.after(0, self.on_list_photos)
             else:

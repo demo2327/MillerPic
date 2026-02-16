@@ -235,3 +235,42 @@ class TestHardDelete:
             Key={"UserId": "user-123", "PhotoId": "photo-456"}
         )
         assert "Item" not in result
+
+    def test_hard_delete_preserves_shared_object(self, aws_resources, mock_env, valid_event):
+        table = aws_resources["table"]
+        s3 = aws_resources["s3"]
+
+        shared_key = "originals/user-source/shared.webp"
+        s3.put_object(
+            Bucket="photos-test-bucket",
+            Key=shared_key,
+            Body=b"shared-image",
+        )
+
+        table.put_item(
+            Item={
+                "UserId": "user-123",
+                "PhotoId": "photo-456",
+                "ObjectKey": shared_key,
+                "DeletedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        table.put_item(
+            Item={
+                "UserId": "user-999",
+                "PhotoId": "photo-shared",
+                "ObjectKey": shared_key,
+                "Status": "ACTIVE",
+            }
+        )
+
+        response = hard_delete.handler(valid_event, None)
+        assert response["statusCode"] == 200
+
+        # Metadata row for deleted photo is gone.
+        removed = table.get_item(Key={"UserId": "user-123", "PhotoId": "photo-456"})
+        assert "Item" not in removed
+
+        # Shared object is still present due to another reference.
+        existing = s3.head_object(Bucket="photos-test-bucket", Key=shared_key)
+        assert existing["ResponseMetadata"]["HTTPStatusCode"] == 200

@@ -105,3 +105,65 @@ class TestUpload:
         assert response["statusCode"] == 400
         body = json.loads(response["body"])
         assert "subjects" in body["error"]
+
+    def test_upload_rejects_invalid_content_hash(self, valid_event):
+        event = dict(valid_event)
+        event["body"] = json.dumps(
+            {
+                "photoId": "photo-invalid-hash",
+                "contentType": "image/webp",
+                "contentHash": "not-a-valid-hash",
+            }
+        )
+
+        response = upload.handler(event, None)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert "contentHash" in body["error"]
+
+    def test_upload_deduplicates_by_content_hash(self, aws_resources):
+        aws_resources["table"].put_item(
+            Item={
+                "UserId": "user-source",
+                "PhotoId": "photo-source",
+                "ObjectKey": "originals/user-source/photo-source.webp",
+                "ContentType": "image/webp",
+                "OriginalFileName": "source.webp",
+                "Status": "ACTIVE",
+                "ContentHash": "a" * 64,
+            }
+        )
+
+        event = {
+            "requestContext": {
+                "authorizer": {
+                    "jwt": {
+                        "claims": {
+                            "sub": "user-target",
+                            "email_verified": "true",
+                        }
+                    }
+                }
+            },
+            "body": json.dumps(
+                {
+                    "photoId": "photo-target",
+                    "contentType": "image/webp",
+                    "originalFileName": "target.webp",
+                    "contentHash": "a" * 64,
+                }
+            ),
+        }
+
+        response = upload.handler(event, None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["uploadRequired"] is False
+        assert body["deduplicated"] is True
+
+        target_item = aws_resources["table"].get_item(Key={"UserId": "user-target", "PhotoId": "photo-target"})["Item"]
+        assert target_item["Status"] == "ACTIVE"
+        assert target_item["ObjectKey"] == "originals/user-source/photo-source.webp"
+        assert target_item["DeduplicatedFromPhotoId"] == "photo-source"
