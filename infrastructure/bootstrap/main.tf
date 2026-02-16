@@ -1,0 +1,133 @@
+terraform {
+  required_version = ">= 1.6.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region  = var.aws_region
+  profile = var.bootstrap_profile
+}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}
+
+locals {
+  state_bucket_name = "${var.state_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+}
+
+resource "aws_s3_bucket" "terraform_state" {
+  bucket = local.state_bucket_name
+}
+
+resource "aws_s3_bucket_public_access_block" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_iam_user" "terraform_deployer" {
+  name = var.terraform_deployer_user_name
+}
+
+resource "aws_iam_user_policy" "terraform_deployer_inline" {
+  name = "${var.project_name}-terraform-deployer-inline"
+  user = aws_iam_user.terraform_deployer.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "TerraformStateBucketAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket",
+          "s3:DeleteBucket",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+          "s3:GetBucketVersioning",
+          "s3:PutBucketVersioning",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:GetEncryptionConfiguration",
+          "s3:PutEncryptionConfiguration",
+          "s3:GetBucketPolicy",
+          "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy"
+        ]
+        Resource = [
+          aws_s3_bucket.terraform_state.arn
+        ]
+      },
+      {
+        Sid    = "TerraformStateObjectsAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:AbortMultipartUpload",
+          "s3:ListBucketMultipartUploads",
+          "s3:ListMultipartUploadParts"
+        ]
+        Resource = [
+          "${aws_s3_bucket.terraform_state.arn}/*"
+        ]
+      },
+      {
+        Sid    = "ProjectInfrastructureManagement"
+        Effect = "Allow"
+        Action = [
+          "apigateway:*",
+          "cloudwatch:*",
+          "dynamodb:*",
+          "events:*",
+          "iam:*",
+          "kms:*",
+          "lambda:*",
+          "logs:*",
+          "s3:*",
+          "secretsmanager:*",
+          "xray:*",
+          "sts:GetCallerIdentity"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "PassRolesToServices"
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = "arn:${data.aws_partition.current.partition}:iam::*:role/${var.project_name}-*"
+      }
+    ]
+  })
+}

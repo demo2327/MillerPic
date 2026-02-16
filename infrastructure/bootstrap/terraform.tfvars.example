@@ -1,0 +1,5 @@
+aws_region                  = "us-east-1"
+bootstrap_profile           = "pandacloud"
+project_name                = "millerpic"
+state_bucket_prefix         = "millerpic-terraform-state"
+terraform_deployer_user_name = "millerpic_tf"

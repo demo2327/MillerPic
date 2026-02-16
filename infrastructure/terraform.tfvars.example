@@ -1,0 +1,10 @@
+aws_region       = "us-east-1"
+environment      = "dev"
+project_name     = "millerpic"
+s3_bucket_prefix = "millerpic-photos"
+
+tags = {
+  Project     = "MillerPic"
+  Environment = "dev"
+  ManagedBy   = "Terraform"
+}
