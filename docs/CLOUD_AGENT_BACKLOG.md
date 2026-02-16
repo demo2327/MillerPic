@@ -24,6 +24,12 @@ Use cloud agents to accelerate delivery while keeping scope small, testable, and
 
 ## Priority Roadmap
 
+## Sprint Status
+
+- Sprint 1: Complete (issues #11, #12, #14, #26 closed)
+- Sprint 2: Ready to start (#13, #15, #16 open)
+- Closeout report: `docs/SPRINT_1_CLOSEOUT.md`
+
 ### P0 (Do first)
 
 1. Upload finalize flow (`upload-complete`) + pending/active states
