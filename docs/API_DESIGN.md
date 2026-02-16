@@ -380,17 +380,38 @@ Update photo metadata (tags, description).
 
 ### GET /photos/search
 
-Search photos by various criteria.
+Search photos by filename and subjects. Only returns ACTIVE, non-deleted photos owned by the authenticated user.
 
 **Query Parameters**
-- `q` - Text search (fileName, description)
-- `tags` - Comma-separated required tags
-- `startDate` - ISO 8601
-- `endDate` - ISO 8601
-- `limit` - Items per page
-- `offset` - Pagination offset
+- `q` (required) - Text search query (searches in OriginalFileName and Subjects fields, case-insensitive)
+- `limit` (optional) - Items per page (default: 20, max: 100)
+- `nextToken` (optional) - Pagination token from previous response
 
-**Response (200)** - Same as GET /photos
+**Response (200)** - Same structure as GET /photos
+```json
+{
+  "photos": [
+    {
+      "photoId": "abc123",
+      "fileName": "vacation.jpg",
+      "objectKey": "user123/abc123.jpg",
+      "contentType": "image/jpeg",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "status": "ACTIVE",
+      "subjects": ["beach", "sunset"],
+      "description": "Beach sunset photo"
+    }
+  ],
+  "count": 1,
+  "nextToken": "eyJ..."
+}
+```
+
+**Error Responses**
+- `400` - Invalid or missing query parameter
+- `401` - Missing or invalid JWT
+- `403` - Email not verified
+- `500` - Internal server error
 
 ---
 

@@ -20,7 +20,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r desktop-client/requirements.txt
       - name: Compile backend handlers
-        run: python -m py_compile backend/src/handlers/upload.py backend/src/handlers/download.py backend/src/handlers/list.py
+        run: python -m py_compile backend/src/handlers/upload.py backend/src/handlers/download.py backend/src/handlers/list.py backend/src/handlers/upload_complete.py backend/src/handlers/patch_photo.py backend/src/handlers/delete.py backend/src/handlers/trash.py backend/src/handlers/hard_delete.py backend/src/handlers/search.py
       - name: Compile desktop app
         run: python -m py_compile desktop-client/app.py
 

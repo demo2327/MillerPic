@@ -83,6 +83,14 @@ resource "aws_apigatewayv2_integration" "hard_delete" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "search" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.search.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "upload" {
   api_id             = aws_apigatewayv2_api.http_api.id
   route_key          = "POST /photos/upload-url"
@@ -143,6 +151,14 @@ resource "aws_apigatewayv2_route" "hard_delete" {
   api_id             = aws_apigatewayv2_api.http_api.id
   route_key          = "DELETE /photos/{photoId}/hard"
   target             = "integrations/${aws_apigatewayv2_integration.hard_delete.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "search" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "GET /photos/search"
+  target             = "integrations/${aws_apigatewayv2_integration.search.id}"
   authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
@@ -213,6 +229,14 @@ resource "aws_lambda_permission" "allow_apigw_hard_delete" {
   statement_id  = "AllowAPIGatewayInvokeHardDelete"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.hard_delete.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_search" {
+  statement_id  = "AllowAPIGatewayInvokeSearch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.search.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }
