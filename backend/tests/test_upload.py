@@ -1,0 +1,107 @@
+import json
+import os
+import sys
+
+import boto3
+import pytest
+from moto import mock_aws
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+
+from handlers import upload
+
+
+@pytest.fixture
+def aws_resources():
+    with mock_aws():
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = dynamodb.create_table(
+            TableName="photos-test",
+            KeySchema=[
+                {"AttributeName": "UserId", "KeyType": "HASH"},
+                {"AttributeName": "PhotoId", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "UserId", "AttributeType": "S"},
+                {"AttributeName": "PhotoId", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="photos-test-bucket")
+
+        yield {
+            "table": table,
+            "s3": s3,
+        }
+
+
+@pytest.fixture
+def valid_event():
+    return {
+        "requestContext": {
+            "authorizer": {
+                "jwt": {
+                    "claims": {
+                        "sub": "user-123",
+                        "email_verified": "true",
+                    }
+                }
+            }
+        },
+        "body": json.dumps(
+            {
+                "photoId": "photo-123",
+                "contentType": "image/webp",
+                "originalFileName": "family-photo.webp",
+            }
+        ),
+    }
+
+
+class TestUpload:
+    def test_upload_success(self, aws_resources, valid_event):
+        response = upload.handler(valid_event, None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert "uploadUrl" in body
+        assert body["objectKey"] == "originals/user-123/photo-123.webp"
+
+        item = aws_resources["table"].get_item(Key={"UserId": "user-123", "PhotoId": "photo-123"})["Item"]
+        assert item["Status"] == "PENDING"
+        assert item["OriginalFileName"] == "family-photo.webp"
+
+    def test_upload_stores_subjects_when_provided(self, aws_resources, valid_event):
+        event = dict(valid_event)
+        event["body"] = json.dumps(
+            {
+                "photoId": "photo-subjects",
+                "contentType": "image/webp",
+                "originalFileName": "trip.webp",
+                "subjects": ["folder:Trips", "folder:trips", "date:2024-05-01"],
+            }
+        )
+
+        response = upload.handler(event, None)
+
+        assert response["statusCode"] == 200
+        item = aws_resources["table"].get_item(Key={"UserId": "user-123", "PhotoId": "photo-subjects"})["Item"]
+        assert item["Subjects"] == ["folder:Trips", "date:2024-05-01"]
+
+    def test_upload_rejects_invalid_subjects(self, valid_event):
+        event = dict(valid_event)
+        event["body"] = json.dumps(
+            {
+                "photoId": "photo-invalid-subjects",
+                "contentType": "image/webp",
+                "subjects": "not-an-array",
+            }
+        )
+
+        response = upload.handler(event, None)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert "subjects" in body["error"]

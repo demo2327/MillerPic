@@ -9,6 +9,36 @@ dynamodb = boto3.resource("dynamodb")
 
 PHOTO_BUCKET = os.environ["PHOTO_BUCKET"]
 PHOTOS_TABLE = os.environ["PHOTOS_TABLE"]
+MAX_SUBJECTS = 50
+
+
+def _sanitize_subjects(subjects):
+    if subjects is None:
+        return None
+    if not isinstance(subjects, list):
+        return None
+
+    trimmed = []
+    for value in subjects:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        if cleaned:
+            trimmed.append(cleaned)
+
+    seen = set()
+    deduped = []
+    for item in trimmed:
+        lowered = item.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        deduped.append(item)
+
+    if len(deduped) > MAX_SUBJECTS:
+        deduped = deduped[:MAX_SUBJECTS]
+
+    return deduped
 
 def handler(event, context):
     try:
@@ -34,6 +64,13 @@ def handler(event, context):
         photo_id = body.get("photoId")
         content_type = body.get("contentType", "image/webp")
         original_file_name = body.get("originalFileName")
+        subjects = _sanitize_subjects(body.get("subjects"))
+
+        if body.get("subjects") is not None and subjects is None:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "subjects must be an array of strings"})
+            }
 
         if original_file_name:
             original_file_name = os.path.basename(str(original_file_name))[:255]
@@ -47,17 +84,19 @@ def handler(event, context):
         object_key = f"originals/{user_id}/{photo_id}.webp"
 
         table = dynamodb.Table(PHOTOS_TABLE)
-        table.put_item(
-            Item={
-                "UserId": user_id,
-                "PhotoId": photo_id,
-                "ObjectKey": object_key,
-                "ContentType": content_type,
-                "OriginalFileName": original_file_name,
-                "CreatedAt": datetime.now(timezone.utc).isoformat(),
-                "Status": "PENDING"
-            }
-        )
+        item = {
+            "UserId": user_id,
+            "PhotoId": photo_id,
+            "ObjectKey": object_key,
+            "ContentType": content_type,
+            "OriginalFileName": original_file_name,
+            "CreatedAt": datetime.now(timezone.utc).isoformat(),
+            "Status": "PENDING"
+        }
+        if subjects is not None:
+            item["Subjects"] = subjects
+
+        table.put_item(Item=item)
 
         upload_url = s3.generate_presigned_url(
             "put_object",

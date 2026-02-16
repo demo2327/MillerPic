@@ -14,6 +14,12 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google_auth_oauthlib.flow import InstalledAppFlow
 import requests
 
+try:
+    from PIL import ExifTags, Image
+except Exception:
+    ExifTags = None
+    Image = None
+
 
 DEFAULT_API_BASE_URL = "https://09ew2nqn27.execute-api.us-east-1.amazonaws.com"
 DEFAULT_OAUTH_CLIENT_FILE = os.path.join(os.path.dirname(__file__), "google_oauth_client.json")
@@ -381,6 +387,121 @@ class MillerPicDesktopApp:
         extension = os.path.splitext(file_name)[1].lower()
         return extension in SYNC_VIDEO_EXTENSIONS
 
+    @staticmethod
+    def _normalize_subject_label(value):
+        normalized = str(value or "").strip().lower()
+        return normalized
+
+    @staticmethod
+    def _dedupe_subjects(subjects):
+        seen = set()
+        deduped = []
+        for subject in subjects:
+            normalized = MillerPicDesktopApp._normalize_subject_label(subject)
+            if not normalized:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(normalized)
+        return deduped
+
+    @staticmethod
+    def _to_float(value):
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _gps_to_decimal(values, reference):
+        if not values or len(values) != 3:
+            return None
+
+        degrees = MillerPicDesktopApp._to_float(values[0])
+        minutes = MillerPicDesktopApp._to_float(values[1])
+        seconds = MillerPicDesktopApp._to_float(values[2])
+        if degrees is None or minutes is None or seconds is None:
+            return None
+
+        decimal = degrees + (minutes / 60.0) + (seconds / 3600.0)
+        ref = str(reference or "").upper()
+        if ref in {"S", "W"}:
+            decimal = -decimal
+        return decimal
+
+    def _extract_exif_subjects(self, file_path):
+        if Image is None or ExifTags is None:
+            return []
+
+        try:
+            with Image.open(file_path) as image:
+                exif_data = image.getexif()
+                if not exif_data:
+                    return []
+
+                tag_map = {
+                    ExifTags.TAGS.get(tag_id, tag_id): value
+                    for tag_id, value in exif_data.items()
+                }
+
+                subjects = []
+                date_taken = tag_map.get("DateTimeOriginal") or tag_map.get("DateTime")
+                if isinstance(date_taken, str):
+                    try:
+                        parsed = datetime.strptime(date_taken, "%Y:%m:%d %H:%M:%S")
+                        subjects.append(f"date:{parsed.date().isoformat()}")
+                    except ValueError:
+                        pass
+
+                gps_raw = tag_map.get("GPSInfo")
+                if isinstance(gps_raw, dict):
+                    gps_map = {
+                        ExifTags.GPSTAGS.get(gps_tag, gps_tag): gps_value
+                        for gps_tag, gps_value in gps_raw.items()
+                    }
+                    latitude = self._gps_to_decimal(gps_map.get("GPSLatitude"), gps_map.get("GPSLatitudeRef"))
+                    longitude = self._gps_to_decimal(gps_map.get("GPSLongitude"), gps_map.get("GPSLongitudeRef"))
+                    if latitude is not None and longitude is not None:
+                        subjects.append(f"geo:{latitude:.5f},{longitude:.5f}")
+
+                return subjects
+        except Exception:
+            return []
+
+    def _extract_folder_subjects(self, file_path, managed_root=None):
+        if not managed_root:
+            return []
+
+        folder_subjects = []
+        normalized_root = self._normalize_path(managed_root)
+        normalized_file = self._normalize_path(file_path)
+        try:
+            common_path = os.path.commonpath([normalized_root, normalized_file])
+        except ValueError:
+            return folder_subjects
+        if common_path != normalized_root:
+            return folder_subjects
+
+        root_label = os.path.basename(normalized_root)
+        if root_label:
+            folder_subjects.append(f"folder:{root_label}")
+
+        parent_dir = os.path.dirname(normalized_file)
+        relative_dir = os.path.relpath(parent_dir, normalized_root)
+        if relative_dir not in {".", ""}:
+            for segment in relative_dir.split(os.sep):
+                if segment and segment != ".":
+                    folder_subjects.append(f"folder:{segment}")
+
+        return folder_subjects
+
+    def _build_subjects_for_file(self, file_path, managed_root=None):
+        subjects = []
+        subjects.extend(self._extract_folder_subjects(file_path, managed_root))
+        subjects.extend(self._extract_exif_subjects(file_path))
+        return self._dedupe_subjects(subjects)
+
     def _load_local_state(self):
         state_path = self._desktop_state_file_path()
         if not os.path.isfile(state_path):
@@ -554,6 +675,7 @@ class MillerPicDesktopApp:
                         "message": "sync-new",
                         "pathKey": path_key,
                         "signature": signature,
+                        "subjects": self._build_subjects_for_file(file_path, managed_folder),
                     }
                     self.upload_queue_items.append(queue_item)
                     self._queue_insert_item(queue_item)
@@ -603,6 +725,7 @@ class MillerPicDesktopApp:
                     "message": "",
                     "pathKey": self._normalize_path(file_path),
                     "signature": self._build_file_signature(file_path),
+                    "subjects": self._build_subjects_for_file(file_path, folder_path),
                 }
                 self.upload_queue_items.append(queue_item)
                 self._queue_insert_item(queue_item)
@@ -720,12 +843,14 @@ class MillerPicDesktopApp:
                 return str(raw_text)[:180]
         return fallback_message
 
-    def _upload_one_file(self, headers, file_path, photo_id, original_file_name, content_type):
+    def _upload_one_file(self, headers, file_path, photo_id, original_file_name, content_type, subjects=None):
         payload = {
             "photoId": photo_id,
             "contentType": content_type,
             "originalFileName": original_file_name,
         }
+        if subjects:
+            payload["subjects"] = subjects
         upload_init_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-url"
 
         init_response = requests.post(upload_init_url, headers=headers, json=payload, timeout=30)
@@ -810,6 +935,7 @@ class MillerPicDesktopApp:
                             photo_id=photo_id,
                             original_file_name=file_name,
                             content_type=content_type,
+                            subjects=item.get("subjects"),
                         )
                         with self.upload_queue_lock:
                             if ok:
@@ -922,6 +1048,7 @@ class MillerPicDesktopApp:
             "photoId": photo_id,
             "contentType": content_type,
             "originalFileName": self.selected_file_name_var.get().strip() or os.path.basename(file_path),
+            "subjects": self._build_subjects_for_file(file_path),
         }
         upload_init_url = f"{self.api_base_url_var.get().rstrip('/')}/photos/upload-url"
 
@@ -936,6 +1063,7 @@ class MillerPicDesktopApp:
                 photo_id=payload["photoId"],
                 original_file_name=payload["originalFileName"],
                 content_type=content_type,
+                subjects=payload.get("subjects"),
             )
 
             if ok:
