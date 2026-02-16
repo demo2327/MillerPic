@@ -5,6 +5,7 @@ import re
 import threading
 import uuid
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from tkinter import END, BOTH, LEFT, RIGHT, X, filedialog, messagebox, ttk
 import tkinter as tk
@@ -25,6 +26,8 @@ GOOGLE_OAUTH_SCOPES = [
 SUPPORTED_MEDIA_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".mp4", ".mov", ".mkv"
 }
+MAX_QUEUE_PARALLELISM = 4
+DEFAULT_QUEUE_PARALLELISM = 2
 
 
 def pretty_json(value):
@@ -50,9 +53,11 @@ class MillerPicDesktopApp:
         self.list_next_token_var = tk.StringVar()
         self.search_query_var = tk.StringVar()
         self.search_limit_var = tk.StringVar(value="20")
+        self.queue_parallelism_var = tk.StringVar(value=str(DEFAULT_QUEUE_PARALLELISM))
         self.latest_photos = []
         self.upload_queue_items = []
         self.upload_queue_running = False
+        self.upload_queue_lock = threading.Lock()
         self.google_credentials = None
 
         self._build_ui()
@@ -108,6 +113,13 @@ class MillerPicDesktopApp:
         queue_actions_row.pack(fill=X, pady=(8, 0))
         ttk.Button(queue_actions_row, text="Enqueue Folder Files", command=self.on_enqueue_folder).pack(side=LEFT)
         ttk.Button(queue_actions_row, text="Run Upload Queue", command=self.on_run_upload_queue).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_actions_row, text="Retry Failed", command=self.on_retry_failed_queue_items).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_actions_row, text="Cancel Queued", command=self.on_cancel_queued_items).pack(side=LEFT, padx=(8, 0))
+
+        queue_config_row = ttk.Frame(upload_frame)
+        queue_config_row.pack(fill=X, pady=(8, 0))
+        ttk.Label(queue_config_row, text=f"Parallel uploads (1-{MAX_QUEUE_PARALLELISM})").pack(side=LEFT)
+        ttk.Entry(queue_config_row, textvariable=self.queue_parallelism_var, width=6).pack(side=LEFT, padx=(8, 0))
 
         self.queue_tree = ttk.Treeview(
             upload_frame,
@@ -351,6 +363,59 @@ class MillerPicDesktopApp:
 
         self.log(f"Queued {queued_count} files for upload.")
 
+    def on_retry_failed_queue_items(self):
+        if self.upload_queue_running:
+            self.log("Queue is running; retry can be applied after current run completes.")
+            return
+
+        retried = 0
+        for item in self.upload_queue_items:
+            if item.get("status") == "FAILED":
+                item["status"] = "QUEUED"
+                item["message"] = ""
+                self._queue_update_item(item["photoId"], "QUEUED", "")
+                retried += 1
+
+        if retried == 0:
+            self.log("No failed queue items to retry.")
+            return
+
+        self.log(f"Marked {retried} failed items as QUEUED.")
+
+    def on_cancel_queued_items(self):
+        cancelled = 0
+        for item in self.upload_queue_items:
+            if item.get("status") == "QUEUED":
+                item["status"] = "CANCELLED"
+                item["message"] = "cancelled by user"
+                self._queue_update_item(item["photoId"], "CANCELLED", "cancelled by user")
+                cancelled += 1
+
+        if cancelled == 0:
+            self.log("No queued items available to cancel.")
+            return
+
+        self.log(f"Cancelled {cancelled} queued items.")
+
+    def _get_queue_parallelism(self):
+        value_raw = self.queue_parallelism_var.get().strip() or str(DEFAULT_QUEUE_PARALLELISM)
+        if not value_raw.isdigit():
+            messagebox.showerror(
+                "Invalid parallelism",
+                f"Parallel uploads must be a number between 1 and {MAX_QUEUE_PARALLELISM}.",
+            )
+            return None
+
+        value = int(value_raw)
+        if value < 1 or value > MAX_QUEUE_PARALLELISM:
+            messagebox.showerror(
+                "Invalid parallelism",
+                f"Parallel uploads must be a number between 1 and {MAX_QUEUE_PARALLELISM}.",
+            )
+            return None
+
+        return value
+
     def on_run_upload_queue(self):
         if self.upload_queue_running:
             self.log("Upload queue is already running.")
@@ -365,8 +430,12 @@ class MillerPicDesktopApp:
             self.log("No queued files to upload.")
             return
 
+        max_parallel = self._get_queue_parallelism()
+        if max_parallel is None:
+            return
+
         self.upload_queue_running = True
-        self._run_in_thread(self._run_upload_queue_flow, headers)
+        self._run_in_thread(self._run_upload_queue_flow, headers, max_parallel)
 
     def _queue_insert_item(self, item):
         file_path = item.get("filePath") or ""
@@ -446,53 +515,85 @@ class MillerPicDesktopApp:
 
         return True, "completed"
 
-    def _run_upload_queue_flow(self, headers):
+    def _run_upload_queue_flow(self, headers, max_parallel):
         queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
-        self.log(f"Starting folder upload queue with {len(queued_items)} files...")
+        self.log(f"Starting folder upload queue with {len(queued_items)} files (parallel={max_parallel})...")
 
-        success_count = 0
-        failed_count = 0
+        stats = {
+            "success": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }
+
+        pending_items = list(queued_items)
 
         try:
-            for item in queued_items:
-                file_path = item["filePath"]
-                file_name = item["fileName"]
-                photo_id = item["photoId"]
+            def _worker_loop():
+                while True:
+                    with self.upload_queue_lock:
+                        if not pending_items:
+                            return
+                        item = pending_items.pop(0)
 
-                item["status"] = "UPLOADING"
-                item["message"] = ""
-                self._queue_update_item(photo_id, "UPLOADING", "")
+                    file_path = item["filePath"]
+                    file_name = item["fileName"]
+                    photo_id = item["photoId"]
 
-                guessed_type, _ = mimetypes.guess_type(file_path)
-                content_type = guessed_type or "application/octet-stream"
+                    with self.upload_queue_lock:
+                        if item.get("status") != "QUEUED":
+                            if item.get("status") == "CANCELLED":
+                                stats["cancelled"] += 1
+                            continue
+                        item["status"] = "UPLOADING"
+                        item["message"] = ""
 
-                try:
-                    ok, message = self._upload_one_file(
-                        headers=headers,
-                        file_path=file_path,
-                        photo_id=photo_id,
-                        original_file_name=file_name,
-                        content_type=content_type,
-                    )
-                    if ok:
-                        item["status"] = "COMPLETED"
-                        item["message"] = "completed"
-                        success_count += 1
-                        self._queue_update_item(photo_id, "COMPLETED", "completed")
-                    else:
-                        item["status"] = "FAILED"
-                        item["message"] = message
-                        failed_count += 1
-                        self._queue_update_item(photo_id, "FAILED", message)
-                        self.log(f"Queue item failed ({file_name}): {message}")
-                except Exception as error:
-                    failed_count += 1
-                    item["status"] = "FAILED"
-                    item["message"] = str(error)
-                    self._queue_update_item(photo_id, "FAILED", str(error))
-                    self.log(f"Queue item failed ({file_name}): {error}")
+                    self._queue_update_item(photo_id, "UPLOADING", "")
 
-            self.log(f"Folder upload queue complete. Success: {success_count}, Failed: {failed_count}")
+                    guessed_type, _ = mimetypes.guess_type(file_path)
+                    content_type = guessed_type or "application/octet-stream"
+
+                    try:
+                        ok, message = self._upload_one_file(
+                            headers=headers,
+                            file_path=file_path,
+                            photo_id=photo_id,
+                            original_file_name=file_name,
+                            content_type=content_type,
+                        )
+                        with self.upload_queue_lock:
+                            if ok:
+                                item["status"] = "COMPLETED"
+                                item["message"] = "completed"
+                                stats["success"] += 1
+                                status = "COMPLETED"
+                                status_message = "completed"
+                            else:
+                                item["status"] = "FAILED"
+                                item["message"] = message
+                                stats["failed"] += 1
+                                status = "FAILED"
+                                status_message = message
+                        self._queue_update_item(photo_id, status, status_message)
+                        if not ok:
+                            self.log(f"Queue item failed ({file_name}): {message}")
+                    except Exception as error:
+                        error_message = str(error)
+                        with self.upload_queue_lock:
+                            item["status"] = "FAILED"
+                            item["message"] = error_message
+                            stats["failed"] += 1
+                        self._queue_update_item(photo_id, "FAILED", error_message)
+                        self.log(f"Queue item failed ({file_name}): {error_message}")
+
+            with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+                futures = [executor.submit(_worker_loop) for _ in range(max_parallel)]
+                for future in futures:
+                    future.result()
+
+            self.log(
+                "Folder upload queue complete. "
+                f"Success: {stats['success']}, Failed: {stats['failed']}, Cancelled: {stats['cancelled']}"
+            )
             self.root.after(0, self.on_list_photos)
         finally:
             self.upload_queue_running = False
