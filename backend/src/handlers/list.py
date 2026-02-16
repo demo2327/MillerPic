@@ -118,17 +118,24 @@ def handler(event, context):
                 else:
                     file_name = item.get("PhotoId")
 
-            photos.append({
+            photo = {
                 "photoId": item.get("PhotoId"),
                 "fileName": file_name,
                 "objectKey": item.get("ObjectKey"),
                 "contentType": item.get("ContentType"),
                 "createdAt": created_at,
                 "status": status or "ACTIVE",
-                "description": item.get("Description"),
-                "subjects": item.get("Subjects"),
-                "takenAt": item.get("TakenAt"),
-            })
+            }
+            
+            # Only include optional metadata fields if they have values
+            if item.get("Description"):
+                photo["description"] = item.get("Description")
+            if item.get("Subjects"):
+                photo["subjects"] = item.get("Subjects")
+            if item.get("TakenAt"):
+                photo["takenAt"] = item.get("TakenAt")
+            
+            photos.append(photo)
 
         new_next_token = _encode_next_token(result.get("LastEvaluatedKey"))
 

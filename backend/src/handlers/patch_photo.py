@@ -156,10 +156,10 @@ def handler(event, context):
                     "statusCode": 400,
                     "body": json.dumps({"error": "subjects must be an array of strings"})
                 }
-            if sanitized_subjects:
-                update_parts.append("#subjects = :subjects")
-                expr_names["#subjects"] = "Subjects"
-                expr_values[":subjects"] = sanitized_subjects
+            # Allow empty list to clear subjects
+            update_parts.append("#subjects = :subjects")
+            expr_names["#subjects"] = "Subjects"
+            expr_values[":subjects"] = sanitized_subjects
 
         # Validate and add takenAt
         if taken_at is not None:
