@@ -1,13 +1,14 @@
 openapi: 3.0.3
 info:
   title: MillerPic API (Current Deployed Subset)
-  version: 0.1.0
+  version: 0.2.0
 servers:
   - url: https://09ew2nqn27.execute-api.us-east-1.amazonaws.com
 paths:
   /photos:
     get:
       summary: List photos
+      description: List active (non-deleted) photos for the authenticated user
       parameters:
         - in: query
           name: limit
@@ -42,6 +43,55 @@ paths:
       responses:
         '200':
           description: Signed upload URL
+  /photos/upload-complete:
+    post:
+      summary: Mark upload as complete
+      description: Transition photo from PENDING to ACTIVE status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photoId]
+              properties:
+                photoId:
+                  type: string
+      responses:
+        '200':
+          description: Photo marked as active
+        '404':
+          description: Photo not found
+  /photos/{photoId}:
+    delete:
+      summary: Soft delete a photo
+      description: Mark photo as deleted with 60-day retention period
+      parameters:
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Photo soft deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photoId:
+                    type: string
+                  deletedAt:
+                    type: string
+                    format: date-time
+                  retentionUntil:
+                    type: string
+                    format: date-time
+        '404':
+          description: Photo not found
+        '409':
+          description: Photo already deleted
   /photos/{photoId}/download-url:
     get:
       summary: Create download URL
@@ -54,6 +104,74 @@ paths:
       responses:
         '200':
           description: Signed download URL
+  /photos/{photoId}/hard:
+    delete:
+      summary: Permanently delete a photo
+      description: Permanently delete photo metadata and S3 object. Photo must be soft deleted first.
+      parameters:
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Photo permanently deleted
+        '400':
+          description: Photo must be soft deleted first
+        '404':
+          description: Photo not found
+  /photos/trash:
+    get:
+      summary: List deleted photos
+      description: List soft-deleted photos for the authenticated user
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: nextToken
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted photo list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        photoId:
+                          type: string
+                        fileName:
+                          type: string
+                        objectKey:
+                          type: string
+                        contentType:
+                          type: string
+                        createdAt:
+                          type: string
+                          format: date-time
+                        deletedAt:
+                          type: string
+                          format: date-time
+                        deletedBy:
+                          type: string
+                        retentionUntil:
+                          type: string
+                          format: date-time
+                  count:
+                    type: integer
+                  nextToken:
+                    type: string
 components:
   securitySchemes:
     bearerAuth:
