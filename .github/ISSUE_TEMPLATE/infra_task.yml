@@ -1,0 +1,38 @@
+name: Infrastructure task
+description: Track infra/security/cost changes
+title: "infra: "
+labels:
+  - infrastructure
+body:
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed change
+      description: What infra change is needed?
+    validations:
+      required: true
+  - type: textarea
+    id: terraform_scope
+    attributes:
+      label: Terraform scope
+      description: Which files/modules/resources will be touched?
+      value: |
+        - infrastructure/
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk analysis
+      description: Blast radius, data risk, downtime risk.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      value: |
+        - [ ] terraform fmt -check -recursive
+        - [ ] terraform validate
+        - [ ] terraform plan reviewed
+        - [ ] rollback path documented
+    validations:
+      required: true
