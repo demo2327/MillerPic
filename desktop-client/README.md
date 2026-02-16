@@ -40,6 +40,7 @@ python app.py
 7. Use **List Photos** to retrieve your photos and paginate with `nextToken`.
 8. Select a row and click **Open Selected Image**.
 9. For folder sync, choose a folder, click **Add Managed Folder**, then click **Run Sync Job**.
+10. Videos detected during sync are marked as skipped and are not uploaded.
 
 ## Notes
 

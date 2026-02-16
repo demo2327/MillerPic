@@ -29,6 +29,9 @@ SUPPORTED_MEDIA_EXTENSIONS = {
 SYNC_IMAGE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"
 }
+SYNC_VIDEO_EXTENSIONS = {
+    ".mp4", ".mov", ".mkv"
+}
 MAX_QUEUE_PARALLELISM = 4
 DEFAULT_QUEUE_PARALLELISM = 2
 DEFAULT_DESKTOP_STATE_FILE = os.path.join(os.path.dirname(__file__), "desktop_state.json")
@@ -373,6 +376,11 @@ class MillerPicDesktopApp:
         extension = os.path.splitext(file_name)[1].lower()
         return extension in SYNC_IMAGE_EXTENSIONS
 
+    @staticmethod
+    def _is_sync_video_file(file_name):
+        extension = os.path.splitext(file_name)[1].lower()
+        return extension in SYNC_VIDEO_EXTENSIONS
+
     def _load_local_state(self):
         state_path = self._desktop_state_file_path()
         if not os.path.isfile(state_path):
@@ -466,6 +474,12 @@ class MillerPicDesktopApp:
                 return True
         return False
 
+    def _queue_find_item(self, path_key, status):
+        for item in self.upload_queue_items:
+            if item.get("pathKey") == path_key and item.get("status") == status:
+                return item
+        return None
+
     def on_run_sync_job(self):
         headers = self._headers()
         if not headers:
@@ -481,6 +495,7 @@ class MillerPicDesktopApp:
 
         added_count = 0
         skipped_known_count = 0
+        skipped_video_count = 0
         missing_folder_count = 0
 
         for managed_folder in self.managed_folders:
@@ -491,6 +506,29 @@ class MillerPicDesktopApp:
 
             for root_dir, _, files in os.walk(managed_folder):
                 for file_name in files:
+                    if self._is_sync_video_file(file_name):
+                        file_path = os.path.join(root_dir, file_name)
+                        path_key = self._normalize_path(file_path)
+                        reason = "video upload disabled by sync policy"
+                        skipped_video_count += 1
+
+                        existing_skip = self._queue_find_item(path_key, "SKIPPED_VIDEO")
+                        if existing_skip:
+                            existing_skip["message"] = reason
+                            self._queue_update_item(existing_skip["photoId"], "SKIPPED_VIDEO", reason)
+                        else:
+                            queue_item = {
+                                "filePath": file_path,
+                                "fileName": file_name,
+                                "photoId": uuid.uuid4().hex,
+                                "status": "SKIPPED_VIDEO",
+                                "message": reason,
+                                "pathKey": path_key,
+                            }
+                            self.upload_queue_items.append(queue_item)
+                            self._queue_insert_item(queue_item)
+                        continue
+
                     if not self._is_sync_image_file(file_name):
                         continue
 
@@ -523,7 +561,8 @@ class MillerPicDesktopApp:
 
         self.log(
             "Sync scan complete. "
-            f"Queued new files: {added_count}, Already synced: {skipped_known_count}, Missing folders: {missing_folder_count}"
+            f"Queued new files: {added_count}, Already synced: {skipped_known_count}, "
+            f"Skipped videos: {skipped_video_count}, Missing folders: {missing_folder_count}"
         )
 
         queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
