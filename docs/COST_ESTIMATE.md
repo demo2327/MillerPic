@@ -178,6 +178,33 @@ Year-over-year costs should remain stable at ~$94/month as photos age and shift 
 
 ---
 
+## Sprint 2 Incremental Cost Impact Review
+
+Sprint 2 shipped desktop queue/UX improvements and ops documentation. No new always-on AWS resources were introduced in Sprint 2, so fixed monthly infrastructure cost is effectively unchanged.
+
+### What changed operationally
+- Desktop queue features increase practical upload throughput and may increase total upload activity.
+- Retry/cancel controls reduce failed partial runs, but retries can temporarily increase request volume.
+- Ops playbook/checklist documentation has near-zero runtime infrastructure cost.
+
+### Incremental variable-cost model (per successful image upload)
+Approximate additional metered operations already used by current flow:
+- `POST /photos/upload-url` (API Gateway + Lambda + DynamoDB write)
+- `PUT` to S3 signed URL (S3 PUT request)
+- `POST /photos/upload-complete` (API Gateway + Lambda + DynamoDB update)
+
+Directional estimate for 100,000 successful uploads (us-east-1 style pricing assumptions):
+- S3 PUT requests: about $0.50
+- API Gateway requests (2 per upload): about $0.70
+- DynamoDB write/update units: about $0.25
+- Lambda invocation/compute for init+complete: typically low single-digit dollars or less at this scale
+
+### Practical conclusion
+- Sprint 2 cost delta is approximately **$0 in fixed baseline** and **low variable request costs** relative to storage.
+- The dominant long-term cost driver remains S3 storage footprint and chosen tiering strategy, not queue-control features.
+
+---
+
 ## What You Get
 
 ✅ Full-featured photo app (web + mobile + desktop clients)  

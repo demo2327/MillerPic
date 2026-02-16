@@ -28,7 +28,49 @@ Use cloud agents to accelerate delivery while keeping scope small, testable, and
 
 - Sprint 1: Complete (issues #11, #12, #14, #26 closed)
 - Sprint 2: Complete (#13, #15, #16 delivered)
-- Closeout report: `docs/SPRINT_1_CLOSEOUT.md`
+- Closeout reports: `docs/SPRINT_1_CLOSEOUT.md`, `docs/SPRINT_2_CLOSEOUT.md`
+
+## User-Driven Rebaseline (Post Sprint 2)
+
+### Requested Product Direction
+- Persist selected folders as **managed folders** in desktop client.
+- Add explicit **Sync job** that uploads only new files from managed folders.
+- Keep cloud files when local files are deleted (no implicit cloud delete from sync).
+- Move output log into optional dialog (not always visible in main layout).
+- Add metadata extraction into `subjects` (date taken + geolocation when available).
+- Handle videos separately; for now videos should be excluded from upload.
+- Add deduplication so same image content uploads once even if present in multiple folders.
+- Improve desktop file-management view for large libraries.
+- Design low-cost original storage + fast preview strategy.
+- Auto-generate labels from folder hierarchy.
+
+### Sprint 3 (User Sync Foundation)
+1. Managed folder registry (persist/load/edit) in desktop app.
+2. Sync engine for new images in managed folders (no remote delete behavior).
+3. Video policy gate (detect and skip videos with explicit status/reporting).
+4. Metadata enrichment pipeline in desktop app:
+  - EXIF date taken to `subjects`
+  - geolocation token(s) to `subjects` when present
+  - folder hierarchy labels to `subjects`
+5. Output panel refactor to optional log dialog.
+
+### Sprint 4 (Scale + Cost Optimization)
+6. Content-based deduplication design and implementation (hash/fingerprint workflow).
+7. Desktop high-scale management view (bulk triage, large-list usability, performant filtering).
+8. Dual-object storage architecture:
+  - original image in lowest-cost acceptable storage tier
+  - preview derivative in fast-access tier for sub-second viewing
+9. Cost/performance benchmark for preview strategy and retrieval SLA.
+
+### Sprint 5 (Hardening + Policy)
+10. Sync observability and health dashboards (scan stats, upload/error rates, duplicate rate).
+11. Safe reindex/rebuild flow for managed-folder catalogs.
+12. Privacy controls for location metadata extraction (opt-in/opt-out + redaction policy).
+
+### Known Constraints / Decisions Needed
+- Dedup scope must be defined (per-user vs global).
+- Preview format/size policy must be defined before cost benchmark lock.
+- Geolocation metadata handling requires explicit privacy default.
 
 ### P0 (Do first)
 
