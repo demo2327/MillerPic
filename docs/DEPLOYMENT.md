@@ -131,6 +131,21 @@ terraform plan -out=tfplan
 terraform show tfplan > plan.txt
 ```
 
+### 4.1 Run Checkov (Terraform Security Scan)
+
+Run Checkov locally before opening a Terraform PR:
+
+```bash
+python -m pip install --upgrade pip
+pip install checkov
+checkov --config-file ../.checkov.yml -d . -d bootstrap
+```
+
+Policy:
+- CI enforces Checkov on Terraform changes.
+- High/Critical findings fail checks by default.
+- Any suppression must use explicit `checkov:skip=` comment with a clear justification.
+
 ### 5. Deploy Infrastructure
 
 ```bash
