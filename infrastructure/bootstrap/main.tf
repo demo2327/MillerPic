@@ -19,8 +19,118 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  state_bucket_name         = "${var.state_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
-  app_sensitive_secret_name = "${var.project_name}/${var.environment}/app-sensitive-config"
+  state_bucket_name            = "${var.state_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+  lambda_artifacts_bucket_name = "${var.lambda_artifacts_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+  lambda_signing_profile_name  = var.lambda_signing_profile_name != "" ? var.lambda_signing_profile_name : "${var.project_name}-lambda-signer-${var.environment}"
+  app_sensitive_secret_name    = "${var.project_name}/${var.environment}/app-sensitive-config"
+}
+
+resource "aws_kms_key" "lambda_artifacts_bucket" {
+  description             = "CMK for signed Lambda artifacts bucket encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableIAMUserPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowS3ServiceUse"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "lambda_artifacts_bucket" {
+  name          = "alias/${var.project_name}-lambda-artifacts-${var.environment}"
+  target_key_id = aws_kms_key.lambda_artifacts_bucket.key_id
+}
+
+resource "aws_s3_bucket" "lambda_artifacts" {
+  #checkov:skip=CKV_AWS_18: Access logging deferred for artifacts bucket to avoid incremental cost; CloudTrail + strict IAM controls are in place. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_144: Cross-region replication deferred due budget constraints for Lambda artifact workflow. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV2_AWS_62: Artifact object notifications are intentionally omitted; signing workflow already has deterministic job status polling and does not require bucket event fan-out. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  bucket = local.lambda_artifacts_bucket_name
+}
+
+resource "aws_s3_bucket_public_access_block" "lambda_artifacts" {
+  bucket = aws_s3_bucket.lambda_artifacts.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "lambda_artifacts" {
+  bucket = aws_s3_bucket.lambda_artifacts.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_artifacts" {
+  bucket = aws_s3_bucket.lambda_artifacts.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.lambda_artifacts_bucket.arn
+    }
+
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "lambda_artifacts" {
+  bucket = aws_s3_bucket.lambda_artifacts.id
+
+  rule {
+    id     = "expire-noncurrent-artifact-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.lambda_artifacts_retention_days
+    }
+  }
+}
+
+resource "aws_signer_signing_profile" "lambda" {
+  name        = local.lambda_signing_profile_name
+  platform_id = "AWSLambda-SHA384-ECDSA"
+
+  signature_validity_period {
+    value = 365
+    type  = "DAYS"
+  }
 }
 
 resource "aws_s3_bucket" "terraform_state" {
@@ -288,6 +398,7 @@ resource "aws_iam_policy" "terraform_deployer" {
           "logs:*",
           "s3:*",
           "secretsmanager:*",
+          "signer:*",
           "sns:*",
           "xray:*",
           "sts:GetCallerIdentity"

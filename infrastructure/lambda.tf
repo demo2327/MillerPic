@@ -21,64 +21,22 @@ locals {
   lambda_private_subnet_ids = [for subnet in data.aws_subnet.lambda_target_vpc : subnet.id if can(regex("private", lower(try(subnet.tags["Name"], ""))))]
 }
 
-data "archive_file" "upload" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/upload.py"
-  output_path = "${path.module}/.artifacts/upload.zip"
+locals {
+  lambda_signing_profile_name_resolved = var.lambda_signing_profile_name != "" ? var.lambda_signing_profile_name : "${var.project_name}-lambda-signer-${var.environment}"
 }
 
-data "archive_file" "download" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/download.py"
-  output_path = "${path.module}/.artifacts/download.zip"
+data "aws_signer_signing_profile" "lambda" {
+  name = local.lambda_signing_profile_name_resolved
 }
 
-data "archive_file" "list" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/list.py"
-  output_path = "${path.module}/.artifacts/list.zip"
-}
+resource "aws_lambda_code_signing_config" "millerpic" {
+  allowed_publishers {
+    signing_profile_version_arns = [data.aws_signer_signing_profile.lambda.version_arn]
+  }
 
-data "archive_file" "upload_complete" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/upload_complete.py"
-  output_path = "${path.module}/.artifacts/upload_complete.zip"
-}
-
-data "archive_file" "patch_photo" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/patch_photo.py"
-  output_path = "${path.module}/.artifacts/patch_photo.zip"
-}
-
-data "archive_file" "delete" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/delete.py"
-  output_path = "${path.module}/.artifacts/delete.zip"
-}
-
-data "archive_file" "trash" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/trash.py"
-  output_path = "${path.module}/.artifacts/trash.zip"
-}
-
-data "archive_file" "hard_delete" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/hard_delete.py"
-  output_path = "${path.module}/.artifacts/hard_delete.zip"
-}
-
-data "archive_file" "search" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/search.py"
-  output_path = "${path.module}/.artifacts/search.zip"
-}
-
-data "archive_file" "get_photo" {
-  type        = "zip"
-  source_file = "${path.module}/../backend/src/handlers/get_photo.py"
-  output_path = "${path.module}/.artifacts/get_photo.zip"
+  policies {
+    untrusted_artifact_on_deployment = "Enforce"
+  }
 }
 
 resource "aws_iam_role" "lambda_exec" {
@@ -233,11 +191,13 @@ resource "aws_lambda_function" "upload" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "upload.handler"
-  filename                       = data.archive_file.upload.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "upload", "signed/upload.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "upload", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.upload.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -262,11 +222,13 @@ resource "aws_lambda_function" "download" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "download.handler"
-  filename                       = data.archive_file.download.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "download", "signed/download.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "download", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.download.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -292,11 +254,13 @@ resource "aws_lambda_function" "list" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "list.handler"
-  filename                       = data.archive_file.list.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "list", "signed/list.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "list", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.list.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -321,11 +285,13 @@ resource "aws_lambda_function" "upload_complete" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "upload_complete.handler"
-  filename                       = data.archive_file.upload_complete.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "upload_complete", "signed/upload_complete.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "upload_complete", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.upload_complete.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -350,11 +316,13 @@ resource "aws_lambda_function" "delete" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "delete.handler"
-  filename                       = data.archive_file.delete.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "delete", "signed/delete.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "delete", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.delete.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -379,11 +347,13 @@ resource "aws_lambda_function" "trash" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "trash.handler"
-  filename                       = data.archive_file.trash.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "trash", "signed/trash.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "trash", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.trash.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -408,11 +378,13 @@ resource "aws_lambda_function" "hard_delete" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "hard_delete.handler"
-  filename                       = data.archive_file.hard_delete.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "hard_delete", "signed/hard_delete.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "hard_delete", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.hard_delete.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -437,11 +409,13 @@ resource "aws_lambda_function" "patch_photo" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "patch_photo.handler"
-  filename                       = data.archive_file.patch_photo.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "patch_photo", "signed/patch_photo.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "patch_photo", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.patch_photo.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -465,11 +439,13 @@ resource "aws_lambda_function" "search" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "search.handler"
-  filename                       = data.archive_file.search.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "search", "signed/search.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "search", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.search.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
@@ -493,11 +469,13 @@ resource "aws_lambda_function" "get_photo" {
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
   handler                        = "get_photo.handler"
-  filename                       = data.archive_file.get_photo.output_path
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "get_photo", "signed/get_photo.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "get_photo", null)
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
-  source_code_hash = data.archive_file.get_photo.output_base64sha256
-  kms_key_arn      = aws_kms_key.lambda_env.arn
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn

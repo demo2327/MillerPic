@@ -28,6 +28,41 @@ variable "s3_bucket_prefix" {
   default     = "millerpic-photos"
 }
 
+variable "lambda_artifacts_bucket_name" {
+  description = "S3 bucket containing signed Lambda deployment artifacts"
+  type        = string
+  default     = ""
+}
+
+variable "lambda_signing_profile_name" {
+  description = "AWS Signer profile name used for Lambda code signing"
+  type        = string
+  default     = ""
+}
+
+variable "lambda_artifact_object_keys" {
+  description = "Map of Lambda handler names to signed S3 object keys"
+  type        = map(string)
+  default = {
+    upload          = "signed/upload.zip"
+    download        = "signed/download.zip"
+    list            = "signed/list.zip"
+    upload_complete = "signed/upload_complete.zip"
+    delete          = "signed/delete.zip"
+    trash           = "signed/trash.zip"
+    hard_delete     = "signed/hard_delete.zip"
+    patch_photo     = "signed/patch_photo.zip"
+    search          = "signed/search.zip"
+    get_photo       = "signed/get_photo.zip"
+  }
+}
+
+variable "lambda_artifact_object_versions" {
+  description = "Map of Lambda handler names to signed S3 object versions"
+  type        = map(string)
+  default     = {}
+}
+
 variable "enable_jwt_auth" {
   description = "Enable API Gateway JWT authorizer on routes"
   type        = bool

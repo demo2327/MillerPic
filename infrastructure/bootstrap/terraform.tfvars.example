@@ -3,7 +3,10 @@ bootstrap_profile           = "pandacloud"
 project_name                = "millerpic"
 environment                 = "dev"
 state_bucket_prefix         = "millerpic-terraform-state"
+lambda_artifacts_bucket_prefix = "millerpic-lambda-artifacts"
 terraform_deployer_user_name = "millerpic_tf"
+lambda_signing_profile_name = "millerpic-lambda-signer-dev"
+lambda_artifacts_retention_days = 30
 
 # Sensitive app config stored in AWS Secrets Manager by this bootstrap stack.
 jwt_issuer                  = "https://accounts.google.com"

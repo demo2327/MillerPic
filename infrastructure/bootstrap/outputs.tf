@@ -8,6 +8,21 @@ output "terraform_state_bucket_name" {
   value       = aws_s3_bucket.terraform_state.bucket
 }
 
+output "lambda_artifacts_bucket_name" {
+  description = "S3 bucket name for signed Lambda deployment artifacts"
+  value       = aws_s3_bucket.lambda_artifacts.bucket
+}
+
+output "lambda_signing_profile_name" {
+  description = "AWS Signer profile name for Lambda artifact signing"
+  value       = aws_signer_signing_profile.lambda.name
+}
+
+output "lambda_signing_profile_version_arn" {
+  description = "Current AWS Signer profile version ARN for Lambda code signing"
+  value       = aws_signer_signing_profile.lambda.version_arn
+}
+
 output "terraform_deployer_user_name" {
   description = "IAM user created for Terraform deployments"
   value       = aws_iam_user.terraform_deployer.name

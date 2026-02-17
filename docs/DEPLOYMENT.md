@@ -159,6 +159,32 @@ Governance:
 - Scope must remain limited to approved resources only.
 - Reassessment is required at the next monthly budget/security review.
 
+### 4.2 Sign Lambda Artifacts (Required Before Lambda Deploy)
+
+`CKV_AWS_272` is enforced via Lambda code signing configuration. Any unsigned artifact deployment will be rejected.
+
+1. Bootstrap prerequisites once:
+```bash
+terraform -chdir=bootstrap apply
+terraform -chdir=bootstrap output lambda_artifacts_bucket_name
+terraform -chdir=bootstrap output lambda_signing_profile_name
+```
+
+2. Sign and publish handler artifacts (from repo root):
+```powershell
+./infrastructure/sign-lambda-artifacts.ps1 `
+  -ArtifactsBucket <bootstrap-output-bucket> `
+  -SigningProfileName <bootstrap-output-profile> `
+  -Region us-east-1
+```
+
+3. Apply infrastructure with generated artifact version map:
+```bash
+terraform -chdir=infrastructure apply
+```
+
+The signing script writes `infrastructure/lambda-artifacts.auto.tfvars.json`, which Terraform consumes automatically.
+
 ### 5. Deploy Infrastructure
 
 ```bash

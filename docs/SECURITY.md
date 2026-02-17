@@ -8,6 +8,13 @@
 4. **Secure by Default**: Security enabled by default, opt-out requires justification
 5. **Transparency**: All security controls documented and auditable
 
+## Lambda Code Integrity (CKV_AWS_272)
+
+- Lambda deployment uses AWS Signer profile + Lambda code signing configuration with `untrusted_artifact_on_deployment = Enforce`.
+- Runtime functions only accept signed artifacts from the approved signing profile.
+- Signed artifacts are published to a dedicated versioned S3 artifacts bucket managed by bootstrap infrastructure.
+- Deployment process requirement: run `infrastructure/sign-lambda-artifacts.ps1` before Terraform apply whenever handler code changes.
+
 ---
 
 ## Terraform Static Security Scanning (Checkov)

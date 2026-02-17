@@ -2,6 +2,8 @@ aws_region       = "us-east-1"
 environment      = "dev"
 project_name     = "millerpic"
 s3_bucket_prefix = "millerpic-photos"
+lambda_artifacts_bucket_name = "millerpic-lambda-artifacts-<account-id>-us-east-1"
+lambda_signing_profile_name  = "millerpic-lambda-signer-dev"
 
 enable_jwt_auth                   = true
 load_sensitive_config_from_secrets = true
@@ -27,6 +29,33 @@ lambda_errors_alarm_threshold     = 5
 lambda_throttles_alarm_threshold  = 1
 alarm_period_seconds              = 300
 alarm_evaluation_periods          = 1
+
+lambda_artifact_object_keys = {
+  upload          = "signed/upload.zip"
+  download        = "signed/download.zip"
+  list            = "signed/list.zip"
+  upload_complete = "signed/upload_complete.zip"
+  delete          = "signed/delete.zip"
+  trash           = "signed/trash.zip"
+  hard_delete     = "signed/hard_delete.zip"
+  patch_photo     = "signed/patch_photo.zip"
+  search          = "signed/search.zip"
+  get_photo       = "signed/get_photo.zip"
+}
+
+# Populate from generated signing output before each Lambda deployment.
+# lambda_artifact_object_versions = {
+#   upload          = "<S3-version-id>"
+#   download        = "<S3-version-id>"
+#   list            = "<S3-version-id>"
+#   upload_complete = "<S3-version-id>"
+#   delete          = "<S3-version-id>"
+#   trash           = "<S3-version-id>"
+#   hard_delete     = "<S3-version-id>"
+#   patch_photo     = "<S3-version-id>"
+#   search          = "<S3-version-id>"
+#   get_photo       = "<S3-version-id>"
+# }
 
 tags = {
   Project     = "MillerPic"

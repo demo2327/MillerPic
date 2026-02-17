@@ -28,6 +28,24 @@ variable "state_bucket_prefix" {
   default     = "millerpic-terraform-state"
 }
 
+variable "lambda_artifacts_bucket_prefix" {
+  description = "Prefix for Lambda artifacts bucket"
+  type        = string
+  default     = "millerpic-lambda-artifacts"
+}
+
+variable "lambda_signing_profile_name" {
+  description = "Optional override for Lambda signing profile name"
+  type        = string
+  default     = ""
+}
+
+variable "lambda_artifacts_retention_days" {
+  description = "Retention period for noncurrent Lambda artifact object versions"
+  type        = number
+  default     = 30
+}
+
 variable "terraform_deployer_user_name" {
   description = "IAM user name for Terraform deployment operations"
   type        = string
