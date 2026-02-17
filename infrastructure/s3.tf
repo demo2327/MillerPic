@@ -2,8 +2,8 @@ locals {
   photo_bucket_name = "${var.s3_bucket_prefix}-${var.environment}"
 }
 
-# checkov:skip=CKV_AWS_18: Budget-approved exception for family-scale workload; access logs deferred to avoid recurring storage/request cost. Compensating controls: CloudTrail, CloudWatch alarms, versioning, public access block. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
 resource "aws_s3_bucket" "photos" {
+  #checkov:skip=CKV_AWS_18: Budget-approved exception for family-scale workload; access logs deferred to avoid recurring storage/request cost. Compensating controls: CloudTrail, CloudWatch alarms, versioning, public access block. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   bucket = local.photo_bucket_name
 }
 
