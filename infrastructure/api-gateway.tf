@@ -179,10 +179,30 @@ resource "aws_apigatewayv2_route" "search" {
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
+resource "aws_cloudwatch_log_group" "api_access" {
+  name              = "/aws/apigateway/${var.project_name}-http-api-${var.environment}"
+  retention_in_days = 14
+}
+
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.http_api.id
   name        = "$default"
   auto_deploy = true
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_access.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      routeKey       = "$context.routeKey"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+      integrationErrorMessage = "$context.integrationErrorMessage"
+    })
+  }
 
   default_route_settings {
     throttling_rate_limit  = var.api_throttle_rate_limit

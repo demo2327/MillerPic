@@ -33,7 +33,8 @@ locals {
 resource "aws_sns_topic" "security_cost_alerts" {
   count = local.use_sns_alert_topic ? 1 : 0
 
-  name = "${var.project_name}-security-cost-alerts-${var.environment}"
+  name              = "${var.project_name}-security-cost-alerts-${var.environment}"
+  kms_master_key_id = "alias/aws/sns"
 }
 
 resource "aws_sns_topic_subscription" "security_cost_alerts_email" {
