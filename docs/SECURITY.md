@@ -29,6 +29,7 @@ checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap
 ### Suppression Policy
 - Suppressions must be explicit inline comments in Terraform:
   - `#checkov:skip=CKV_AWS_XXX: <reason>`
+- For current pinned Checkov behavior in this repo, place suppression comments **inside the target `resource` block** (not only above it), or they may be ignored and reported as failures.
 - Reason must include business/security context and compensating control when applicable.
 - Suppressions are reviewed in PR like any other security exception.
 
@@ -40,7 +41,7 @@ checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap
 | `CKV_AWS_18` | S3 buckets `photos` and `terraform_state` | S3 access logging deferred to avoid additional storage/request cost this budget cycle | CloudTrail audit logs, S3 public access block, versioning, IAM least privilege | MillerPic Platform Team | 2026-03-16 |
 | `CKV2_AWS_57` | `aws_secretsmanager_secret.app_sensitive_config` in `infrastructure/bootstrap/main.tf` | Secret stores static sensitive configuration values (issuer/audience/contact), not rotatable credentials | IaC change control, PR review, least-privilege access to secret, explicit monthly review | MillerPic Platform Team | 2026-03-16 |
 
-Suppression scope is intentionally limited to the two budget-approved checks above. Any new suppression requires explicit sprint planning approval.
+Suppression scope is intentionally limited to the budget-approved checks above. Any new suppression requires explicit sprint planning approval.
 
 ---
 
