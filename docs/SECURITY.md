@@ -36,8 +36,9 @@ checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap
 
 | Check | Scope | Rationale | Compensating Controls | Owner | Next Review |
 | --- | --- | --- | --- | --- | --- |
-| `CKV_AWS_50` | Lambda functions in `infrastructure/lambda.tf` and bootstrap rotation Lambda in `infrastructure/bootstrap/main.tf` | X-Ray tracing deferred due recurring ingestion/storage cost for current family-scale workload | CloudWatch logs and alarms, Lambda DLQ, API error/throttle alarms | MillerPic Platform Team | 2026-03-16 |
+| `CKV_AWS_50` | Lambda functions in `infrastructure/lambda.tf` | X-Ray tracing deferred due recurring ingestion/storage cost for current family-scale workload | CloudWatch logs and alarms, Lambda DLQ, API error/throttle alarms | MillerPic Platform Team | 2026-03-16 |
 | `CKV_AWS_18` | S3 buckets `photos` and `terraform_state` | S3 access logging deferred to avoid additional storage/request cost this budget cycle | CloudTrail audit logs, S3 public access block, versioning, IAM least privilege | MillerPic Platform Team | 2026-03-16 |
+| `CKV2_AWS_57` | `aws_secretsmanager_secret.app_sensitive_config` in `infrastructure/bootstrap/main.tf` | Secret stores static sensitive configuration values (issuer/audience/contact), not rotatable credentials | IaC change control, PR review, least-privilege access to secret, explicit monthly review | MillerPic Platform Team | 2026-03-16 |
 
 Suppression scope is intentionally limited to the two budget-approved checks above. Any new suppression requires explicit sprint planning approval.
 
