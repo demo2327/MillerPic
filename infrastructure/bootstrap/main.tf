@@ -25,6 +25,7 @@ locals {
 
 resource "aws_s3_bucket" "terraform_state" {
   #checkov:skip=CKV_AWS_18: Budget-approved exception for bootstrap/state bucket; S3 access logs deferred to avoid additional bucket + log retention cost. Compensating controls: CloudTrail and strict IAM on state resources. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_144: Cross-region replication deferred due cost constraints for bootstrap/state workload; current durability posture is sufficient for present recovery objectives. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   bucket = local.state_bucket_name
 }
 
@@ -50,8 +51,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.terraform_state_bucket.arn
     }
+
+    bucket_key_enabled = true
   }
 }
 
@@ -89,6 +93,70 @@ resource "aws_kms_key" "app_sensitive_config" {
   description             = "CMK for ${var.project_name} ${var.environment} app sensitive config secret"
   enable_key_rotation     = true
   deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowSecretsManagerUse"
+        Effect = "Allow"
+        Principal = {
+          Service = "secretsmanager.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+          }
+          StringLike = {
+            "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_kms_key" "terraform_state_bucket" {
+  description             = "CMK for bootstrap terraform state bucket encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableIAMUserPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "terraform_state_bucket" {
+  name          = "alias/${var.project_name}-terraform-state-${var.environment}"
+  target_key_id = aws_kms_key.terraform_state_bucket.key_id
 }
 
 resource "aws_kms_alias" "app_sensitive_config" {

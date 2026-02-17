@@ -1,8 +1,25 @@
 locals {
-  lambda_runtime = "python3.12"
+  lambda_runtime       = "python3.12"
+  lambda_target_vpc_id = "vpc-0d9d34e0e08aad1f7"
 }
 
 data "aws_caller_identity" "current" {}
+
+data "aws_subnets" "lambda_target_vpc" {
+  filter {
+    name   = "vpc-id"
+    values = [local.lambda_target_vpc_id]
+  }
+}
+
+data "aws_subnet" "lambda_target_vpc" {
+  for_each = toset(data.aws_subnets.lambda_target_vpc.ids)
+  id       = each.value
+}
+
+locals {
+  lambda_private_subnet_ids = [for subnet in data.aws_subnet.lambda_target_vpc : subnet.id if can(regex("private", lower(try(subnet.tags["Name"], ""))))]
+}
 
 data "archive_file" "upload" {
   type        = "zip"
@@ -84,6 +101,45 @@ resource "aws_iam_role" "lambda_exec" {
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
   role       = aws_iam_role.lambda_exec.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_security_group" "lambda_vpc" {
+  name        = "${var.project_name}-lambda-vpc-${var.environment}"
+  description = "Security group for MillerPic Lambdas in private subnets"
+  vpc_id      = local.lambda_target_vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_kms_key" "lambda_env" {
+  description             = "CMK for Lambda environment variable encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableIAMUserPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "lambda_env" {
+  name          = "alias/${var.project_name}-lambda-env-${var.environment}"
+  target_key_id = aws_kms_key.lambda_env.key_id
 }
 
 resource "aws_kms_key" "lambda_dlq" {
@@ -181,9 +237,15 @@ resource "aws_lambda_function" "upload" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.upload.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -204,9 +266,15 @@ resource "aws_lambda_function" "download" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.download.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -228,9 +296,15 @@ resource "aws_lambda_function" "list" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.list.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -251,9 +325,15 @@ resource "aws_lambda_function" "upload_complete" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.upload_complete.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -274,9 +354,15 @@ resource "aws_lambda_function" "delete" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.delete.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -297,9 +383,15 @@ resource "aws_lambda_function" "trash" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.trash.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -320,9 +412,15 @@ resource "aws_lambda_function" "hard_delete" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.hard_delete.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -343,9 +441,15 @@ resource "aws_lambda_function" "patch_photo" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.patch_photo.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -365,9 +469,15 @@ resource "aws_lambda_function" "search" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.search.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
@@ -387,9 +497,15 @@ resource "aws_lambda_function" "get_photo" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.get_photo.output_base64sha256
+  kms_key_arn      = aws_kms_key.lambda_env.arn
 
   dead_letter_config {
     target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
   }
 
   environment {
