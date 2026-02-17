@@ -23,7 +23,7 @@ locals {
   app_sensitive_secret_name = "${var.project_name}/${var.environment}/app-sensitive-config"
 }
 
-#checkov:skip=CKV_AWS_18: Budget-approved exception for bootstrap/state bucket; S3 access logs deferred to avoid additional bucket + log retention cost. Compensating controls: CloudTrail and strict IAM on state resources. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+# checkov:skip=CKV_AWS_18: Budget-approved exception for bootstrap/state bucket; S3 access logs deferred to avoid additional bucket + log retention cost. Compensating controls: CloudTrail and strict IAM on state resources. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
 resource "aws_s3_bucket" "terraform_state" {
   bucket = local.state_bucket_name
 }
@@ -74,7 +74,7 @@ resource "aws_iam_user" "terraform_deployer" {
   name = var.terraform_deployer_user_name
 }
 
-#checkov:skip=CKV2_AWS_57: Secret contains static sensitive configuration values (issuer/audience/contact), not rotatable credentials. Rotating identical values adds no security benefit; changes are controlled through IaC review and deployment process. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+# checkov:skip=CKV2_AWS_57: Secret contains static sensitive configuration values (issuer/audience/contact), not rotatable credentials. Rotating identical values adds no security benefit; changes are controlled through IaC review and deployment process. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
 resource "aws_secretsmanager_secret" "app_sensitive_config" {
   name        = local.app_sensitive_secret_name
   description = "Sensitive application configuration for ${var.project_name} ${var.environment}"
