@@ -6,6 +6,7 @@
 **/*.tfplan
 infrastructure/.terraform.lock.hcl
 infrastructure/bootstrap/.terraform.lock.hcl
+infrastructure/lambda-artifacts.auto.tfvars.json
 
 # Node
 backend/node_modules/

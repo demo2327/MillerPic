@@ -8,7 +8,7 @@ environment                  = "dev"
 project_name                 = "millerpic"
 s3_bucket_prefix             = "millerpic-photos"
 lambda_artifacts_bucket_name = "millerpic-lambda-artifacts-468541713603-us-east-1"
-lambda_signing_profile_name  = "millerpic-lambda-signer-dev"
+lambda_signing_profile_name  = "millerpiclambdasignerdev"
 
 enable_jwt_auth = true
 

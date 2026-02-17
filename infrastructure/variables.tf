@@ -38,6 +38,11 @@ variable "lambda_signing_profile_name" {
   description = "AWS Signer profile name used for Lambda code signing"
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.lambda_signing_profile_name == "" || can(regex("^[A-Za-z0-9]{1,64}$", var.lambda_signing_profile_name))
+    error_message = "lambda_signing_profile_name must be empty or 1-64 alphanumeric characters (A-Z, a-z, 0-9)."
+  }
 }
 
 variable "lambda_artifact_object_keys" {

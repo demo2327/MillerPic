@@ -22,7 +22,7 @@ locals {
 }
 
 locals {
-  lambda_signing_profile_name_resolved = var.lambda_signing_profile_name != "" ? var.lambda_signing_profile_name : "${var.project_name}-lambda-signer-${var.environment}"
+  lambda_signing_profile_name_resolved = var.lambda_signing_profile_name != "" ? var.lambda_signing_profile_name : lower(replace(replace("${var.project_name}lambdasigner${var.environment}", "-", ""), "_", ""))
 }
 
 data "aws_signer_signing_profile" "lambda" {

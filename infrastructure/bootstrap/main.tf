@@ -21,7 +21,7 @@ data "aws_partition" "current" {}
 locals {
   state_bucket_name            = "${var.state_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
   lambda_artifacts_bucket_name = "${var.lambda_artifacts_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
-  lambda_signing_profile_name  = var.lambda_signing_profile_name != "" ? var.lambda_signing_profile_name : "${var.project_name}-lambda-signer-${var.environment}"
+  lambda_signing_profile_name  = var.lambda_signing_profile_name != "" ? var.lambda_signing_profile_name : lower(replace(replace("${var.project_name}lambdasigner${var.environment}", "-", ""), "_", ""))
   app_sensitive_secret_name    = "${var.project_name}/${var.environment}/app-sensitive-config"
 }
 
@@ -371,6 +371,8 @@ resource "aws_iam_policy" "terraform_deployer" {
           "budgets:*",
           "cloudwatch:*",
           "dynamodb:*",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs",
           "events:*",
           "iam:CreateRole",
           "iam:DeleteRole",
@@ -404,6 +406,18 @@ resource "aws_iam_policy" "terraform_deployer" {
           "sts:GetCallerIdentity"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "ProjectKmsUsage"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*",
+          "kms:DescribeKey"
+        ]
+        Resource = "arn:${data.aws_partition.current.partition}:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*"
       },
       {
         Sid    = "PassRolesToServices"

@@ -67,19 +67,52 @@ try {
         $unsignedKey = "$UnsignedPrefix/$timestamp/$fn.zip"
 
         aws s3 cp $zipPath "s3://$ArtifactsBucket/$unsignedKey" --region $Region | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload unsigned artifact for $fn to s3://$ArtifactsBucket/$unsignedKey"
+        }
 
-        $startJobJson = aws signer start-signing-job --source "s3={bucketName=$ArtifactsBucket,key=$unsignedKey}" --destination "s3={bucketName=$ArtifactsBucket,prefix=$SignedPrefix/}" --profile-name $SigningProfileName --region $Region
+        $unsignedHeadJson = aws s3api head-object --bucket $ArtifactsBucket --key $unsignedKey --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to read unsigned artifact metadata for $fn"
+        }
+        $unsignedHead = $unsignedHeadJson | ConvertFrom-Json
+
+        if (-not $unsignedHead.VersionId) {
+            throw "Unsigned object version ID not found for $fn at key $unsignedKey"
+        }
+
+        $startJobJson = aws signer start-signing-job --source "s3={bucketName=$ArtifactsBucket,key=$unsignedKey,version=$($unsignedHead.VersionId)}" --destination "s3={bucketName=$ArtifactsBucket,prefix=$SignedPrefix/}" --profile-name $SigningProfileName --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to start signing job for $fn"
+        }
+
         $startJob = $startJobJson | ConvertFrom-Json
 
+        if (-not $startJob.jobId) {
+            throw "Signer did not return a job ID for $fn"
+        }
+
         aws signer wait successful-signing-job --job-id $startJob.jobId --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            throw "Signing job failed for $fn (jobId=$($startJob.jobId))"
+        }
 
         $jobDetailsJson = aws signer describe-signing-job --job-id $startJob.jobId --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to describe signing job for $fn (jobId=$($startJob.jobId))"
+        }
         $jobDetails = $jobDetailsJson | ConvertFrom-Json
 
         $signedKey = $jobDetails.signedObject.s3.key
+        if (-not $signedKey) {
+            throw "Signer response missing signed object key for $fn (jobId=$($startJob.jobId))"
+        }
         $artifactKeys[$fn] = $signedKey
 
         $headJson = aws s3api head-object --bucket $ArtifactsBucket --key $signedKey --region $Region
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to read signed object metadata for $fn at key $signedKey"
+        }
         $head = $headJson | ConvertFrom-Json
 
         if (-not $head.VersionId) {
@@ -104,7 +137,9 @@ try {
         New-Item -ItemType Directory -Path $outputDir | Out-Null
     }
 
-    $tfvars | ConvertTo-Json -Depth 6 | Set-Content -Path $outputPath -Encoding UTF8
+    $tfvarsJson = $tfvars | ConvertTo-Json -Depth 6
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($outputPath, $tfvarsJson, $utf8NoBom)
 
     Write-Host "Signed Lambda artifacts complete."
     Write-Host "Generated Terraform vars: $outputPath"
