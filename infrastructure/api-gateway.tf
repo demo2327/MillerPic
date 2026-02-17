@@ -181,7 +181,8 @@ resource "aws_apigatewayv2_route" "search" {
 
 resource "aws_cloudwatch_log_group" "api_access" {
   name              = "/aws/apigateway/${var.project_name}-http-api-${var.environment}"
-  retention_in_days = 14
+  retention_in_days = 365
+  kms_key_id        = "alias/aws/logs"
 }
 
 resource "aws_apigatewayv2_stage" "default" {

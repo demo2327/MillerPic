@@ -1,120 +1,81 @@
 # Daily Command Center
 
-## Today’s Top 3 Outcomes
-- [x] Sprint 4 scope completed (#53, #44, #42, #43 closed)
-- [x] Checkov Terraform security scanning enabled in CI with policy docs
-- [x] Global dedupe + scalable queue triage + dual-tier storage strategy delivered
+## Mission for Tomorrow (Highest Priority)
+**Primary objective:** Reduce and triage remaining Checkov failures with budget-aware decisions, then lock in the next remediation order.
 
-## In Progress
-- Sprint 5 planning and sequencing (observability, reindex safety, geolocation governance)
+## Top 3 Outcomes (Tomorrow)
+- [ ] Publish an updated Checkov findings snapshot (failed + skipped + deltas from prior run).
+- [ ] Produce a decision table for all remaining failed checks: remediate now, suppress with governance, or defer.
+- [ ] Open/refresh implementation issues for the next approved remediation wave.
 
-## Blockers
-- None
+## Current Security Baseline (As of Last Run)
+- Checkov scan verifies suppressions are now recognized when placed **inside** Terraform resource blocks.
+- Active suppressed controls currently expected:
+	- `CKV_AWS_50` (Lambda X-Ray)
+	- `CKV_AWS_18` (S3 access logging)
+	- `CKV2_AWS_57` (static sensitive config secret rotation)
+- Remaining failed controls to prioritize for decisioning:
+	- `CKV_AWS_117`, `CKV_AWS_272`, `CKV_AWS_173`, `CKV_AWS_144`, `CKV_AWS_145`, `CKV2_AWS_62`
+	- Plus smaller-count findings (`CKV_AWS_119`, `CKV_AWS_149`, `CKV_AWS_40`, `CKV_AWS_273`, `CKV2_AWS_73`, `CKV_AWS_158`, `CKV_AWS_338`)
 
-## Next Commands
+## Execution Plan (Tomorrow)
+
+### 1) Morning Verification Loop (Must-do first)
 ```powershell
-# Example quick loop
-.\desktop-client\.venv\Scripts\python -m py_compile .\desktop-client\app.py
-terraform -chdir=infrastructure fmt -check -recursive
-terraform -chdir=infrastructure validate
+gh workflow run ci-checks.yml -f run_checkov=true
+gh run list --workflow ci-checks.yml --event workflow_dispatch --limit 3
 ```
 
-## PRs / Issues Today
-- Issues closed in Sprint 4: #53, #44, #42, #43
-- Recent PRs merged: #54, #55, #56, #57, #58
-
-## Incident Cheat-Sheet (Rollback-Safe)
-
-### Ownership
-- Incident commander: platform owner on call
-- Terraform operator: infra owner
-- API verifier: backend owner
-- Communications: project owner (status + issue updates)
-
-### 1) Fast Triage (Read-only)
+### 2) Pull and Summarize Findings
 ```powershell
-terraform -chdir=infrastructure plan
-gh run list --repo demo2327/MillerPic --limit 10
+# Replace <RUN_ID> with latest workflow_dispatch run
+gh run view <RUN_ID> --log > .tmp_checkov.log
+
+# Quick summary lines
+Select-String -Path .tmp_checkov.log -Pattern "Passed checks|Failed checks|Skipped checks"
 ```
 
-### 2) Guardrail Drift Check (Read-only)
+### 3) Normalize Findings by Check ID
 ```powershell
-terraform -chdir=infrastructure fmt -check -recursive
-terraform -chdir=infrastructure validate
-terraform -chdir=infrastructure plan
+$raw = Get-Content .tmp_checkov.log -Raw
+$clean = [regex]::Replace($raw, "`e\[[0-9;]*[A-Za-z]", "")
+$clean = [regex]::Replace($clean, '\x1B\[[0-9;]*[A-Za-z]', '')
+$matches = [regex]::Matches($clean, 'Check:\s*(CKV2?_AWS_\d+)[\s\S]*?FAILED for resource:\s*([^\r\n]+)')
+$rows = foreach($m in $matches){ [pscustomobject]@{ Check=$m.Groups[1].Value; Resource=$m.Groups[2].Value } }
+$rows | Sort-Object Check,Resource -Unique | Group-Object Check | Sort-Object Name | Select-Object Name,Count
 ```
 
-### 3) Safe Rollback Trigger
-```powershell
-gh workflow run "CI Checks" --repo demo2327/MillerPic
-```
+### 4) Decision Gate (Required before code changes)
+For each failed check, assign one of:
+- **Remediate now** (low cost / high security return)
+- **Suppress with governance** (temporary budget exception with owner + review date)
+- **Defer** (explicitly tracked, no silent carryover)
 
-### 4) Post-Restore Verification
-```powershell
-.\desktop-client\.venv\Scripts\python.exe -m py_compile .\backend\src\handlers\upload.py .\backend\src\handlers\download.py .\backend\src\handlers\list.py .\desktop-client\app.py
-```
+### 5) Implementation Batch Rules
+- Keep each PR focused to one control family when possible.
+- Every suppression must include: reason, compensating controls, owner, review date.
+- Every remediation PR must include Terraform plan summary + cost note.
 
-### 5) Evidence Capture
-- Add command outputs to the active incident issue.
-- Record who executed rollback and exact UTC timestamp.
-- Link related PRs and workflow runs before resolving the incident.
+## Tomorrow Success Criteria
+- A single up-to-date Checkov findings summary is posted in repo docs/issues.
+- Next remediation batch is approved and queued with explicit owners.
+- No ambiguity remains on skipped checks vs failed checks.
 
-## Monthly Guardrail Review Checklist
-
-### Ownership + Cadence
-- Owner: infra owner
-- Reviewer: backend owner
-- Cadence: first business day of each month
-- Artifact: checklist update in the monthly ops issue
-
-### Throttle Thresholds
-- Verify API throttle defaults in Terraform are unchanged from approved baseline.
-- Confirm no accidental route-level throttle overrides were introduced.
-- If values changed unintentionally, open rollback PR immediately.
-
-### Lambda Concurrency Thresholds
-- Confirm reserved concurrency matches approved values for critical handlers.
-- Validate there are no handlers with unexpected unbounded concurrency.
-- If drift is found, restore previous known-good values and attach plan output.
-
-### Budget + Alarm Thresholds
-- Verify monthly budget limits and forecast alerts match expected guardrail values.
-- Confirm alarm actions still route to the correct notification targets.
-- If thresholds were edited outside approved change control, revert and re-validate.
-
-### Monthly Execution Commands (Rollback-Safe)
+## Rapid Commands
 ```powershell
 terraform -chdir=infrastructure fmt -check -recursive
 terraform -chdir=infrastructure validate
 terraform -chdir=infrastructure plan
-gh issue create --repo demo2327/MillerPic --title "Monthly guardrail review - $(Get-Date -Format yyyy-MM)" --body "Checklist run completed. Attach plan summary, threshold verification, and owner sign-off."
+terraform -chdir=infrastructure/bootstrap validate
+gh run list --workflow ci-checks.yml --limit 10
 ```
 
-## Monthly Cost Dashboard (Sprint 3)
+## Risk Watch
+- **False confidence risk:** suppression comments outside resource blocks may be ignored by Checkov in this environment.
+- **Cost creep risk:** enabling VPC/KMS/replication controls without cost review can move monthly baseline.
+- **Tracking risk:** deferred checks without issue ownership can stall.
 
-### Purpose
-- Separate cost growth from image volume growth vs metadata overhead.
-- Validate that video-skip policy is reducing avoidable storage/request cost.
-
-### Metrics to Capture Monthly
-- `sync_images_uploaded`: count of images uploaded by managed-folder sync.
-- `sync_videos_skipped`: count of videos skipped by sync policy.
-- `dynamodb_photo_item_avg_size`: average photo metadata item size (sampled).
-- `s3_total_storage_gb`: total S3 bytes in photos bucket (converted to GB).
-- `s3_put_requests`: monthly S3 PUT request count.
-
-### Review Notes
-- Rising storage with stable upload count suggests larger image sizes or reduced dedupe efficiency.
-- Rising DynamoDB item size with stable upload count suggests metadata expansion.
-- If skipped videos drops unexpectedly, verify sync video policy behavior in desktop client.
-
-### Monthly Cost Review Commands
-```powershell
-aws cloudwatch get-metric-statistics --namespace AWS/S3 --metric-name NumberOfObjects --dimensions Name=BucketName,Value=<photo-bucket>,Name=StorageType,Value=AllStorageTypes --statistics Average --start-time (Get-Date).AddDays(-31).ToUniversalTime().ToString("o") --end-time (Get-Date).ToUniversalTime().ToString("o") --period 86400
-aws cloudwatch get-metric-statistics --namespace AWS/DynamoDB --metric-name ConsumedWriteCapacityUnits --dimensions Name=TableName,Value=<photos-table> --statistics Sum --start-time (Get-Date).AddDays(-31).ToUniversalTime().ToString("o") --end-time (Get-Date).ToUniversalTime().ToString("o") --period 86400
-gh issue create --repo demo2327/MillerPic --title "Monthly Sprint 3 cost dashboard - $(Get-Date -Format yyyy-MM)" --body "Capture: sync_images_uploaded, sync_videos_skipped, dynamodb_photo_item_avg_size, s3_total_storage_gb, s3_put_requests. Include variance vs prior month and actions."
-```
-
-## End-of-day Notes
-- What shipped: Sprint 4 scale/cost/security scope complete and merged.
-- What is next: execute Sprint 5 hardening and governance tasks.
+## End-of-day Exit Conditions (Tomorrow)
+- Checkov snapshot refreshed and archived.
+- Decision table complete for all remaining failed controls.
+- Next implementation issues updated and assigned.
