@@ -20,18 +20,21 @@
         "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
       }
     },
-    "aws-devops": {
-      "type": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-aws-devops-server"
-      ],
-      "env": {
-        "AWS_PROFILE": "millerpic_tf",
-        "AWS_REGION": "us-east-1"
-      }
-    },
+    // Disabled due to invalid upstream tool schema validation:
+    // "Failed to validate tool mcp_aws-devops_cost_optimizer: tool parameters array type must have items"
+    // Re-enable once the MCP server publishes a fixed schema.
+    // "aws-devops": {
+    //   "type": "stdio",
+    //   "command": "npx",
+    //   "args": [
+    //     "-y",
+    //     "mcp-aws-devops-server"
+    //   ],
+    //   "env": {
+    //     "AWS_PROFILE": "millerpic_tf",
+    //     "AWS_REGION": "us-east-1"
+    //   }
+    // },
     "http": {
       "type": "stdio",
       "command": "npx",

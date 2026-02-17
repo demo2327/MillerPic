@@ -1,12 +1,12 @@
 # Daily Command Center
 
 ## Today’s Top 3 Outcomes
-- [x] Sprint 3 rebaseline scope completed (#39, #40, #41 closed)
-- [x] Managed-folder sync + video-skip policy shipped in desktop client
-- [x] Auto-subject enrichment shipped (folder labels + EXIF date/geolocation)
+- [x] Sprint 4 scope completed (#53, #44, #42, #43 closed)
+- [x] Checkov Terraform security scanning enabled in CI with policy docs
+- [x] Global dedupe + scalable queue triage + dual-tier storage strategy delivered
 
 ## In Progress
-- Sprint 4 planning and sequencing (global dedupe, scalable library view, dual-tier storage)
+- Sprint 5 planning and sequencing (observability, reindex safety, geolocation governance)
 
 ## Blockers
 - None
@@ -20,8 +20,8 @@ terraform -chdir=infrastructure validate
 ```
 
 ## PRs / Issues Today
-- Issues closed in Sprint 3: #39, #40, #41
-- Recent PRs merged: #47, #48, #49, #50, #51
+- Issues closed in Sprint 4: #53, #44, #42, #43
+- Recent PRs merged: #54, #55, #56, #57, #58
 
 ## Incident Cheat-Sheet (Rollback-Safe)
 
@@ -116,5 +116,5 @@ gh issue create --repo demo2327/MillerPic --title "Monthly Sprint 3 cost dashboa
 ```
 
 ## End-of-day Notes
-- What shipped: Sprint 3 user-sync foundation complete, plus Sprint 3 cost-impact docs.
-- What is next: execute Sprint 4 architecture and implementation tasks.
+- What shipped: Sprint 4 scale/cost/security scope complete and merged.
+- What is next: execute Sprint 5 hardening and governance tasks.
