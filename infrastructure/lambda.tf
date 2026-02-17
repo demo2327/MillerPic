@@ -84,6 +84,12 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+resource "aws_sqs_queue" "lambda_dlq" {
+  name                      = "${var.project_name}-lambda-dlq-${var.environment}"
+  message_retention_seconds = 1209600
+  kms_master_key_id         = "alias/aws/sqs"
+}
+
 resource "aws_iam_policy" "app_policy" {
   name = "${var.project_name}-lambda-policy-${var.environment}"
 
@@ -99,6 +105,11 @@ resource "aws_iam_policy" "app_policy" {
         Effect   = "Allow"
         Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem", "dynamodb:DeleteItem"]
         Resource = aws_dynamodb_table.photos.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.lambda_dlq.arn
       }
     ]
   })
@@ -119,6 +130,10 @@ resource "aws_lambda_function" "upload" {
 
   source_code_hash = data.archive_file.upload.output_base64sha256
 
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
   environment {
     variables = {
       PHOTO_BUCKET = aws_s3_bucket.photos.bucket
@@ -136,6 +151,10 @@ resource "aws_lambda_function" "download" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.download.output_base64sha256
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
 
   environment {
     variables = {
@@ -156,6 +175,10 @@ resource "aws_lambda_function" "list" {
 
   source_code_hash = data.archive_file.list.output_base64sha256
 
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
   environment {
     variables = {
       PHOTO_BUCKET = aws_s3_bucket.photos.bucket
@@ -173,6 +196,10 @@ resource "aws_lambda_function" "upload_complete" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.upload_complete.output_base64sha256
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
 
   environment {
     variables = {
@@ -192,6 +219,10 @@ resource "aws_lambda_function" "delete" {
 
   source_code_hash = data.archive_file.delete.output_base64sha256
 
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
   environment {
     variables = {
       PHOTO_BUCKET = aws_s3_bucket.photos.bucket
@@ -209,6 +240,10 @@ resource "aws_lambda_function" "trash" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.trash.output_base64sha256
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
 
   environment {
     variables = {
@@ -228,6 +263,10 @@ resource "aws_lambda_function" "hard_delete" {
 
   source_code_hash = data.archive_file.hard_delete.output_base64sha256
 
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
   environment {
     variables = {
       PHOTO_BUCKET = aws_s3_bucket.photos.bucket
@@ -246,6 +285,10 @@ resource "aws_lambda_function" "patch_photo" {
 
   source_code_hash = data.archive_file.patch_photo.output_base64sha256
 
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
   environment {
     variables = {
       PHOTOS_TABLE = aws_dynamodb_table.photos.name
@@ -263,6 +306,10 @@ resource "aws_lambda_function" "search" {
 
   source_code_hash = data.archive_file.search.output_base64sha256
 
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
   environment {
     variables = {
       PHOTOS_TABLE = aws_dynamodb_table.photos.name
@@ -279,6 +326,10 @@ resource "aws_lambda_function" "get_photo" {
   reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
 
   source_code_hash = data.archive_file.get_photo.output_base64sha256
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
 
   environment {
     variables = {
