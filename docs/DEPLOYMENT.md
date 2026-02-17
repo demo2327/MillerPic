@@ -146,6 +146,15 @@ Policy:
 - High/Critical findings fail checks by default.
 - Any suppression must use explicit `checkov:skip=` comment with a clear justification.
 
+Current approved suppressions (Sprint 6):
+- `CKV_AWS_50` (Lambda X-Ray) — owner: MillerPic Platform Team; next review: 2026-03-16.
+- `CKV_AWS_18` (S3 access logging) — owner: MillerPic Platform Team; next review: 2026-03-16.
+
+Governance:
+- Suppressions must include compensating controls in the inline reason.
+- Scope must remain limited to approved resources only.
+- Reassessment is required at the next monthly budget/security review.
+
 ### 5. Deploy Infrastructure
 
 ```bash

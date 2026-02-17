@@ -34,6 +34,7 @@ locals {
   app_sensitive_secret_name = "${var.project_name}/${var.environment}/app-sensitive-config"
 }
 
+#checkov:skip=CKV_AWS_18: Budget-approved exception for bootstrap/state bucket; S3 access logs deferred to avoid additional bucket + log retention cost. Compensating controls: CloudTrail and strict IAM on state resources. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
 resource "aws_s3_bucket" "terraform_state" {
   bucket = local.state_bucket_name
 }
@@ -141,6 +142,7 @@ resource "aws_iam_role_policy" "app_sensitive_config_rotation" {
   })
 }
 
+#checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for low-volume secret rotation function. Compensating controls: CloudWatch logs + alarming and limited invocation path via Secrets Manager. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
 resource "aws_lambda_function" "app_sensitive_config_rotation" {
   function_name = "${var.project_name}-secret-rotation-${var.environment}"
   role          = aws_iam_role.app_sensitive_config_rotation.arn
