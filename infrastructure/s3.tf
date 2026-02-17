@@ -47,3 +47,18 @@ resource "aws_s3_bucket_intelligent_tiering_configuration" "archive" {
     days        = 180
   }
 }
+
+resource "aws_s3_bucket_lifecycle_configuration" "photos" {
+  bucket = aws_s3_bucket.photos.id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}

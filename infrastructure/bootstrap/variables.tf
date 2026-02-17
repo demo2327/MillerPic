@@ -51,3 +51,9 @@ variable "cost_alert_email" {
   type        = string
   default     = ""
 }
+
+variable "secret_rotation_days" {
+  description = "Automatic rotation interval in days for bootstrap Secrets Manager secrets"
+  type        = number
+  default     = 90
+}

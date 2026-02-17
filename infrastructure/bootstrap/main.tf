@@ -2,6 +2,11 @@ terraform {
   required_version = ">= 1.6.0"
 
   required_providers {
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
+
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
@@ -17,6 +22,12 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 data "aws_partition" "current" {}
+
+data "archive_file" "app_sensitive_config_rotation" {
+  type        = "zip"
+  source_file = "${path.module}/rotation/app_sensitive_config_rotation.py"
+  output_path = "${path.module}/.artifacts/app_sensitive_config_rotation.zip"
+}
 
 locals {
   state_bucket_name         = "${var.state_bucket_prefix}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
@@ -54,6 +65,21 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 resource "aws_iam_user" "terraform_deployer" {
   name = var.terraform_deployer_user_name
 }
@@ -70,6 +96,80 @@ resource "aws_secretsmanager_secret_version" "app_sensitive_config" {
     jwt_audience     = var.jwt_audience
     cost_alert_email = var.cost_alert_email
   })
+}
+
+resource "aws_iam_role" "app_sensitive_config_rotation" {
+  name = "${var.project_name}-secret-rotation-role-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "app_sensitive_config_rotation_basic" {
+  role       = aws_iam_role.app_sensitive_config_rotation.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "app_sensitive_config_rotation" {
+  name = "${var.project_name}-secret-rotation-policy-${var.environment}"
+  role = aws_iam_role.app_sensitive_config_rotation.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:UpdateSecretVersionStage"
+        ]
+        Resource = aws_secretsmanager_secret.app_sensitive_config.arn
+      }
+    ]
+  })
+}
+
+resource "aws_lambda_function" "app_sensitive_config_rotation" {
+  function_name = "${var.project_name}-secret-rotation-${var.environment}"
+  role          = aws_iam_role.app_sensitive_config_rotation.arn
+  runtime       = "python3.12"
+  handler       = "app_sensitive_config_rotation.handler"
+  filename      = data.archive_file.app_sensitive_config_rotation.output_path
+
+  source_code_hash = data.archive_file.app_sensitive_config_rotation.output_base64sha256
+}
+
+resource "aws_lambda_permission" "allow_secrets_manager_rotation" {
+  statement_id  = "AllowExecutionFromSecretsManager"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.app_sensitive_config_rotation.function_name
+  principal     = "secretsmanager.amazonaws.com"
+}
+
+resource "aws_secretsmanager_secret_rotation" "app_sensitive_config" {
+  secret_id           = aws_secretsmanager_secret.app_sensitive_config.id
+  rotation_lambda_arn = aws_lambda_function.app_sensitive_config_rotation.arn
+
+  rotation_rules {
+    automatically_after_days = var.secret_rotation_days
+  }
+
+  depends_on = [
+    aws_secretsmanager_secret_version.app_sensitive_config,
+    aws_lambda_permission.allow_secrets_manager_rotation
+  ]
 }
 
 resource "aws_iam_user_policy" "terraform_deployer_inline" {
