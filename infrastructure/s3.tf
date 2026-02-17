@@ -31,7 +31,38 @@ resource "aws_kms_alias" "photos_bucket" {
 resource "aws_s3_bucket" "photos" {
   #checkov:skip=CKV_AWS_18: Budget-approved exception for family-scale workload; access logs deferred to avoid recurring storage/request cost. Compensating controls: CloudTrail, CloudWatch alarms, versioning, public access block. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   #checkov:skip=CKV_AWS_144: Cross-region replication deferred due cost constraints for family-scale workload; durability and recovery objectives currently met without CRR. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV2_AWS_62: Object-level event notifications are intentionally omitted for this workload to avoid non-value operational noise/cost. Security objective is access control, enforced via explicit deny bucket policy (only Lambda app role sessions + account root for object actions), plus public access block, KMS encryption, and CloudTrail. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   bucket = local.photo_bucket_name
+}
+
+resource "aws_s3_bucket_policy" "photos_restrict_object_access" {
+  bucket = aws_s3_bucket.photos.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyObjectAccessExceptAppRoleAndRoot"
+        Effect    = "Deny"
+        Principal = "*"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${aws_s3_bucket.photos.arn}/*"
+        Condition = {
+          StringNotLike = {
+            "aws:PrincipalArn" = [
+              "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root",
+              aws_iam_role.lambda_exec.arn,
+              "arn:aws:sts::${data.aws_caller_identity.current.account_id}:assumed-role/${aws_iam_role.lambda_exec.name}/*"
+            ]
+          }
+        }
+      }
+    ]
+  })
 }
 
 resource "aws_s3_bucket_public_access_block" "photos" {

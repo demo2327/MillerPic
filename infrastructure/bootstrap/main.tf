@@ -26,7 +26,37 @@ locals {
 resource "aws_s3_bucket" "terraform_state" {
   #checkov:skip=CKV_AWS_18: Budget-approved exception for bootstrap/state bucket; S3 access logs deferred to avoid additional bucket + log retention cost. Compensating controls: CloudTrail and strict IAM on state resources. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   #checkov:skip=CKV_AWS_144: Cross-region replication deferred due cost constraints for bootstrap/state workload; current durability posture is sufficient for present recovery objectives. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV2_AWS_62: Object-level event notifications are intentionally omitted for terraform state workload because they do not reduce relevant security risk and add operational cost/noise. Security objective is strict state-object access control, enforced by explicit deny bucket policy (only terraform deployer user + account root), plus KMS encryption, versioning, and CloudTrail. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   bucket = local.state_bucket_name
+}
+
+resource "aws_s3_bucket_policy" "terraform_state_restrict_object_access" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyStateObjectAccessExceptDeployerAndRoot"
+        Effect    = "Deny"
+        Principal = "*"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${aws_s3_bucket.terraform_state.arn}/*"
+        Condition = {
+          StringNotLike = {
+            "aws:PrincipalArn" = [
+              "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root",
+              aws_iam_user.terraform_deployer.arn
+            ]
+          }
+        }
+      }
+    ]
+  })
 }
 
 resource "aws_s3_bucket_public_access_block" "terraform_state" {
