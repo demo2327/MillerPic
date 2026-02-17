@@ -67,9 +67,10 @@ resource "aws_security_group" "lambda_vpc" {
   vpc_id      = local.lambda_target_vpc_id
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "Allow outbound HTTPS only"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
