@@ -150,6 +150,7 @@ Current approved suppressions (Sprint 6):
 - `CKV_AWS_50` (Lambda X-Ray) — owner: MillerPic Platform Team; next review: 2026-03-16.
 - `CKV_AWS_18` (S3 access logging) — owner: MillerPic Platform Team; next review: 2026-03-16.
 - `CKV2_AWS_57` (Secrets Manager rotation for static sensitive config secret) — owner: MillerPic Platform Team; next review: 2026-03-16.
+- `CKV_AWS_273` (Terraform deployer IAM user) — owner: MillerPic Platform Team; next review: 2026-03-16.
 
 Governance:
 - Suppressions must include compensating controls in the inline reason.

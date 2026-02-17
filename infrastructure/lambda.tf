@@ -2,6 +2,8 @@ locals {
   lambda_runtime = "python3.12"
 }
 
+data "aws_caller_identity" "current" {}
+
 data "archive_file" "upload" {
   type        = "zip"
   source_file = "${path.module}/../backend/src/handlers/upload.py"
@@ -84,10 +86,59 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+resource "aws_kms_key" "lambda_dlq" {
+  description             = "CMK for Lambda DLQ SQS encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowRootAccountAdmin"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowSQSServiceUse"
+        Effect = "Allow"
+        Principal = {
+          Service = "sqs.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*",
+          "kms:ReEncrypt*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id
+          }
+          StringLike = {
+            "kms:ViaService" = "sqs.${var.aws_region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "lambda_dlq" {
+  name          = "alias/${var.project_name}-lambda-dlq-${var.environment}"
+  target_key_id = aws_kms_key.lambda_dlq.key_id
+}
+
 resource "aws_sqs_queue" "lambda_dlq" {
   name                      = "${var.project_name}-lambda-dlq-${var.environment}"
   message_retention_seconds = 1209600
-  kms_master_key_id         = "alias/aws/sqs"
+  kms_master_key_id         = aws_kms_key.lambda_dlq.arn
 }
 
 resource "aws_iam_policy" "app_policy" {

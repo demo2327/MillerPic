@@ -71,13 +71,36 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
 }
 
 resource "aws_iam_user" "terraform_deployer" {
+  #checkov:skip=CKV_AWS_273: Terraform deployer remains an IAM user by explicit operational choice; access keys are managed manually with strict rotation/revocation procedures outside Terraform. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   name = var.terraform_deployer_user_name
+}
+
+resource "aws_iam_group" "terraform_deployer" {
+  name = "${var.project_name}-terraform-deployer-group"
+}
+
+resource "aws_iam_group_membership" "terraform_deployer" {
+  name  = "${var.project_name}-terraform-deployer-membership"
+  users = [aws_iam_user.terraform_deployer.name]
+  group = aws_iam_group.terraform_deployer.name
+}
+
+resource "aws_kms_key" "app_sensitive_config" {
+  description             = "CMK for ${var.project_name} ${var.environment} app sensitive config secret"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+}
+
+resource "aws_kms_alias" "app_sensitive_config" {
+  name          = "alias/${var.project_name}-app-sensitive-config-${var.environment}"
+  target_key_id = aws_kms_key.app_sensitive_config.key_id
 }
 
 resource "aws_secretsmanager_secret" "app_sensitive_config" {
   #checkov:skip=CKV2_AWS_57: Secret contains static sensitive configuration values (issuer/audience/contact), not rotatable credentials. Rotating identical values adds no security benefit; changes are controlled through IaC review and deployment process. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   name        = local.app_sensitive_secret_name
   description = "Sensitive application configuration for ${var.project_name} ${var.environment}"
+  kms_key_id  = aws_kms_key.app_sensitive_config.arn
 }
 
 resource "aws_secretsmanager_secret_version" "app_sensitive_config" {
@@ -89,9 +112,8 @@ resource "aws_secretsmanager_secret_version" "app_sensitive_config" {
   })
 }
 
-resource "aws_iam_user_policy" "terraform_deployer_inline" {
+resource "aws_iam_policy" "terraform_deployer" {
   name = "${var.project_name}-terraform-deployer-inline"
-  user = aws_iam_user.terraform_deployer.name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -184,4 +206,9 @@ resource "aws_iam_user_policy" "terraform_deployer_inline" {
       }
     ]
   })
+}
+
+resource "aws_iam_group_policy_attachment" "terraform_deployer" {
+  group      = aws_iam_group.terraform_deployer.name
+  policy_arn = aws_iam_policy.terraform_deployer.arn
 }
