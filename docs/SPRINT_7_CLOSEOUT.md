@@ -19,8 +19,12 @@
   - Replaced stale backlog/checklist content with current baseline and practical runbook commands.
 
 ## Validation
-- Pre-change baseline CI run still showed warning: `Directory gcp does not exist; skipping it`.
-- A follow-up CI run is required after this commit to confirm warning removal on updated workflow.
+- Pre-change baseline CI run showed warning: `Directory gcp does not exist; skipping it`.
+- Post-change validation run `22146478765` completed successfully.
+- Checkov job (`64025049457`) summary:
+  - `Passed checks: 254, Failed checks: 0, Skipped checks: 21`
+  - `Passed checks: 508, Failed checks: 0, Skipped checks: 42`
+- Confirmed warning removed: `Directory gcp does not exist; skipping it` occurrences = `0`.
 
 ## Security Baseline at Closeout
 - Checkov failures remain at zero in current baseline runs.
