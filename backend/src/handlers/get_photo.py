@@ -5,8 +5,10 @@ from datetime import datetime
 import boto3
 
 dynamodb = boto3.resource("dynamodb")
+s3 = boto3.client("s3")
 
 PHOTOS_TABLE = os.environ["PHOTOS_TABLE"]
+PHOTO_BUCKET = os.environ["PHOTO_BUCKET"]
 
 
 def handler(event, context):
@@ -96,6 +98,21 @@ def handler(event, context):
             photo["subjects"] = subjects
         if taken_at:
             photo["takenAt"] = taken_at
+
+        thumbnail_key = item.get("ThumbnailKey")
+        if thumbnail_key:
+            photo["thumbnailKey"] = thumbnail_key
+            try:
+                photo["thumbnailUrl"] = s3.generate_presigned_url(
+                    "get_object",
+                    Params={
+                        "Bucket": PHOTO_BUCKET,
+                        "Key": thumbnail_key,
+                    },
+                    ExpiresIn=3600,
+                )
+            except Exception as thumbnail_error:
+                print(f"get_photo thumbnail URL generation error: {thumbnail_error}")
 
         return {
             "statusCode": 200,

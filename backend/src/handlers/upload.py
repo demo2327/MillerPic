@@ -108,7 +108,7 @@ def handler(event, context):
         if content_hash:
             dedupe_result = table.scan(
                 FilterExpression=Attr("ContentHash").eq(content_hash) & Attr("Status").eq("ACTIVE"),
-                ProjectionExpression="UserId, PhotoId, ObjectKey",
+                ProjectionExpression="UserId, PhotoId, ObjectKey, ThumbnailKey",
                 Limit=1,
             )
             dedupe_items = dedupe_result.get("Items") or []
@@ -116,6 +116,12 @@ def handler(event, context):
                 dedupe_source = dedupe_items[0]
 
         object_key = dedupe_source.get("ObjectKey") if dedupe_source else f"originals/{user_id}/{photo_id}.webp"
+        is_image_upload = str(content_type or "").lower().startswith("image/")
+        thumbnail_key = None
+        if dedupe_source and dedupe_source.get("ThumbnailKey"):
+            thumbnail_key = dedupe_source.get("ThumbnailKey")
+        elif is_image_upload:
+            thumbnail_key = f"thumbnails/{user_id}/{photo_id}.webp"
 
         status = "ACTIVE" if dedupe_source else "PENDING"
         item = {
@@ -131,9 +137,13 @@ def handler(event, context):
             item["Subjects"] = subjects
         if content_hash is not None:
             item["ContentHash"] = content_hash
+        if thumbnail_key:
+            item["ThumbnailKey"] = thumbnail_key
         if dedupe_source:
             item["DeduplicatedFromPhotoId"] = dedupe_source.get("PhotoId")
             item["DeduplicatedFromUserId"] = dedupe_source.get("UserId")
+            if dedupe_source.get("ThumbnailKey"):
+                item["ThumbnailKey"] = dedupe_source.get("ThumbnailKey")
 
         table.put_item(Item=item)
 
@@ -144,6 +154,7 @@ def handler(event, context):
                     "uploadRequired": False,
                     "deduplicated": True,
                     "objectKey": object_key,
+                    "thumbnailKey": dedupe_source.get("ThumbnailKey"),
                     "linkedToPhotoId": dedupe_source.get("PhotoId"),
                     "linkedToUserId": dedupe_source.get("UserId"),
                 })
@@ -159,6 +170,18 @@ def handler(event, context):
             ExpiresIn=900
         )
 
+        thumbnail_upload_url = None
+        if thumbnail_key:
+            thumbnail_upload_url = s3.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": PHOTO_BUCKET,
+                    "Key": thumbnail_key,
+                    "ContentType": "image/webp",
+                },
+                ExpiresIn=900,
+            )
+
         return {
             "statusCode": 200,
             "body": json.dumps({
@@ -166,6 +189,8 @@ def handler(event, context):
                 "deduplicated": False,
                 "uploadUrl": upload_url,
                 "objectKey": object_key,
+                "thumbnailKey": thumbnail_key,
+                "thumbnailUploadUrl": thumbnail_upload_url,
                 "expiresInSeconds": 900
             })
         }

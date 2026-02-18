@@ -7,8 +7,10 @@ import boto3
 from boto3.dynamodb.conditions import Key, Attr
 
 dynamodb = boto3.resource("dynamodb")
+s3 = boto3.client("s3")
 
 PHOTOS_TABLE = os.environ["PHOTOS_TABLE"]
+PHOTO_BUCKET = os.environ["PHOTO_BUCKET"]
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
 QUERY_BATCH_SIZE = 100
@@ -178,6 +180,21 @@ def handler(event, context):
                     photo["subjects"] = subjects
                 if taken_at:
                     photo["takenAt"] = taken_at
+
+                thumbnail_key = item.get("ThumbnailKey")
+                if thumbnail_key:
+                    photo["thumbnailKey"] = thumbnail_key
+                    try:
+                        photo["thumbnailUrl"] = s3.generate_presigned_url(
+                            "get_object",
+                            Params={
+                                "Bucket": PHOTO_BUCKET,
+                                "Key": thumbnail_key,
+                            },
+                            ExpiresIn=3600,
+                        )
+                    except Exception as thumbnail_error:
+                        print(f"search thumbnail URL generation error: {thumbnail_error}")
                 
                 photos.append(photo)
                 
