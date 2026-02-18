@@ -43,6 +43,27 @@ paths:
       responses:
         '200':
           description: Signed upload URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadRequired:
+                    type: boolean
+                  deduplicated:
+                    type: boolean
+                  uploadUrl:
+                    type: string
+                    format: uri
+                  objectKey:
+                    type: string
+                  thumbnailKey:
+                    type: string
+                  thumbnailUploadUrl:
+                    type: string
+                    format: uri
+                  expiresInSeconds:
+                    type: integer
   /photos/upload-complete:
     post:
       summary: Mark upload as complete
@@ -94,6 +115,11 @@ paths:
                   status:
                     type: string
                     enum: [ACTIVE]
+                  thumbnailKey:
+                    type: string
+                  thumbnailUrl:
+                    type: string
+                    format: uri
                   description:
                     type: string
                   subjects:
@@ -210,6 +236,11 @@ paths:
                         retentionUntil:
                           type: string
                           format: date-time
+                        thumbnailKey:
+                          type: string
+                        thumbnailUrl:
+                          type: string
+                          format: uri
                   count:
                     type: integer
                   nextToken:

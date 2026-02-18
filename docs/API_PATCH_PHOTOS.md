@@ -188,6 +188,8 @@ The `GET /photos` endpoint now includes the new metadata fields in its response:
       "contentType": "image/webp",
       "createdAt": "2024-07-15T10:00:00Z",
       "status": "ACTIVE",
+      "thumbnailKey": "thumbnails/user-456/photo-123.webp",
+      "thumbnailUrl": "https://...signed-thumbnail-url...",
       "description": "Beautiful day at the beach",
       "subjects": ["beach", "summer", "family"],
       "takenAt": "2024-07-15T14:30:00Z"
