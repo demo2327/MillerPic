@@ -24,13 +24,13 @@ MillerPic uses Checkov in CI to statically scan Terraform changes.
 ### Enforcement Model
 - Trigger: runs on pull requests/commits that modify Terraform-related files.
 - Threshold: High/Critical findings fail CI by default.
-- Scope: Terraform under `infrastructure/`, `infrastructure/bootstrap/`, and `gcp/`.
+- Scope: Terraform under `infrastructure/` and `infrastructure/bootstrap/`.
 
 ### Local Reproduction
 ```bash
 python -m pip install --upgrade pip
 pip install checkov
-checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap -d gcp
+checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap
 ```
 
 ### Suppression Policy

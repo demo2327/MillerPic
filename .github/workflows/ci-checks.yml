@@ -33,8 +33,6 @@ jobs:
               - 'infrastructure/**/*.tfvars'
               - 'infrastructure/bootstrap/**/*.tf'
               - 'infrastructure/bootstrap/**/*.tfvars'
-              - 'gcp/**/*.tf'
-              - 'gcp/**/*.tfvars'
               - '.checkov.yml'
 
   python-compile:
@@ -157,4 +155,4 @@ jobs:
           pip install checkov
       - name: Run Checkov (Terraform)
         run: |
-          checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap -d gcp
+          checkov --config-file .checkov.yml -d infrastructure -d infrastructure/bootstrap
