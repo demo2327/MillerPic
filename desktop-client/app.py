@@ -6,6 +6,8 @@ import re
 import threading
 import uuid
 import webbrowser
+import ctypes
+from ctypes import wintypes
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from io import BytesIO
@@ -14,6 +16,7 @@ import tkinter as tk
 
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials as GoogleOAuthCredentials
 import requests
 
 try:
@@ -44,6 +47,11 @@ SYNC_VIDEO_EXTENSIONS = {
 MAX_QUEUE_PARALLELISM = 4
 DEFAULT_QUEUE_PARALLELISM = 2
 DEFAULT_DESKTOP_STATE_FILE = os.path.join(os.path.dirname(__file__), "desktop_state.json")
+DEFAULT_AUTH_STATE_FILE = os.path.join(
+    os.environ.get("APPDATA") or os.path.expanduser("~"),
+    "MillerPic",
+    "auth_state.bin",
+)
 
 
 def pretty_json(value):
@@ -75,6 +83,7 @@ class MillerPicDesktopApp:
         self.thumbnail_status_var = tk.StringVar(value="Thumbnail preview: none")
         self.queue_parallelism_var = tk.StringVar(value=str(DEFAULT_QUEUE_PARALLELISM))
         self.queue_status_filter_var = tk.StringVar(value="ALL")
+        self.queue_curation_filter_var = tk.StringVar(value="ALL")
         self.queue_search_filter_var = tk.StringVar()
         self.latest_photos = []
         self.display_photos = []
@@ -82,6 +91,8 @@ class MillerPicDesktopApp:
         self.list_previous_tokens = []
         self.list_last_limit = "20"
         self.thumbnail_preview_image = None
+        self.list_thumbnail_images = {}
+        self.list_thumbnail_generation = 0
         self.upload_queue_items = []
         self.upload_queue_running = False
         self.upload_queue_lock = threading.Lock()
@@ -93,6 +104,13 @@ class MillerPicDesktopApp:
         self._load_local_state()
 
         self._build_ui()
+        self._restore_google_session_if_available()
+
+    class _DataBlob(ctypes.Structure):
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.POINTER(ctypes.c_byte)),
+        ]
 
     def _build_ui(self):
         self.main_canvas = tk.Canvas(self.root, highlightthickness=0)
@@ -173,8 +191,11 @@ class MillerPicDesktopApp:
         queue_actions_row.pack(fill=X, pady=(8, 0))
         ttk.Button(queue_actions_row, text="Enqueue Folder Files", command=self.on_enqueue_folder).pack(side=LEFT)
         ttk.Button(queue_actions_row, text="Run Upload Queue", command=self.on_run_upload_queue).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_actions_row, text="Mark Keep", command=self.on_mark_selected_keep).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_actions_row, text="Mark Reject", command=self.on_mark_selected_reject).pack(side=LEFT, padx=(8, 0))
         ttk.Button(queue_actions_row, text="Retry Failed", command=self.on_retry_failed_queue_items).pack(side=LEFT, padx=(8, 0))
         ttk.Button(queue_actions_row, text="Cancel Queued", command=self.on_cancel_queued_items).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(queue_actions_row, text="Delete Rejected Local Files", command=self.on_delete_rejected_local_files).pack(side=LEFT, padx=(8, 0))
 
         queue_config_row = ttk.Frame(upload_frame)
         queue_config_row.pack(fill=X, pady=(8, 0))
@@ -183,16 +204,18 @@ class MillerPicDesktopApp:
 
         self.queue_tree = ttk.Treeview(
             upload_frame,
-            columns=("file", "status", "message"),
+            columns=("file", "curation", "status", "message"),
             show="headings",
             height=5,
         )
         self.queue_tree.heading("file", text="File")
+        self.queue_tree.heading("curation", text="Curation")
         self.queue_tree.heading("status", text="Status")
         self.queue_tree.heading("message", text="Message")
         self.queue_tree.column("file", width=260)
+        self.queue_tree.column("curation", width=90)
         self.queue_tree.column("status", width=120)
-        self.queue_tree.column("message", width=420)
+        self.queue_tree.column("message", width=330)
         self.queue_tree.pack(fill=X, pady=(8, 0))
 
         queue_manage_row = ttk.Frame(upload_frame)
@@ -206,6 +229,14 @@ class MillerPicDesktopApp:
             textvariable=self.queue_status_filter_var,
             values=queue_status_values,
             width=14,
+            state="readonly",
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Label(queue_manage_row, text="Curation").pack(side=LEFT, padx=(10, 0))
+        ttk.Combobox(
+            queue_manage_row,
+            textvariable=self.queue_curation_filter_var,
+            values=["ALL", "KEEP", "REJECT"],
+            width=10,
             state="readonly",
         ).pack(side=LEFT, padx=(8, 0))
         ttk.Entry(queue_manage_row, textvariable=self.queue_search_filter_var, width=24).pack(side=LEFT, padx=(8, 0))
@@ -272,27 +303,41 @@ class MillerPicDesktopApp:
 
         ttk.Label(list_frame, textvariable=self.list_status_var).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
+        tree_style = ttk.Style()
+        tree_style.configure("MillerPic.Treeview", rowheight=72)
+
+        tree_container = ttk.Frame(list_frame)
+        tree_container.grid(row=3, column=0, columnspan=4, sticky="nsew", pady=(10, 0))
+
         self.photos_tree = ttk.Treeview(
-            list_frame,
-            columns=("group", "thumb", "fileName", "subjects", "photoId", "contentType", "createdAt"),
-            show="headings",
+            tree_container,
+            columns=("group", "fileName", "subjects", "photoId", "contentType", "createdAt"),
+            show="tree headings",
+            style="MillerPic.Treeview",
             height=6,
         )
+        self.photos_tree.heading("#0", text="Thumb")
         self.photos_tree.heading("group", text="Group")
-        self.photos_tree.heading("thumb", text="Thumb")
         self.photos_tree.heading("fileName", text="File Name")
         self.photos_tree.heading("subjects", text="Labels")
         self.photos_tree.heading("photoId", text="Photo ID")
         self.photos_tree.heading("contentType", text="Content-Type")
         self.photos_tree.heading("createdAt", text="Created At")
+        self.photos_tree.column("#0", width=84, stretch=False, anchor="center")
         self.photos_tree.column("group", width=140)
-        self.photos_tree.column("thumb", width=70)
         self.photos_tree.column("fileName", width=220)
         self.photos_tree.column("subjects", width=220)
         self.photos_tree.column("photoId", width=220)
         self.photos_tree.column("contentType", width=150)
         self.photos_tree.column("createdAt", width=180)
-        self.photos_tree.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        photos_tree_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.photos_tree.yview)
+        self.photos_tree.configure(yscrollcommand=photos_tree_scrollbar.set)
+
+        self.photos_tree.grid(row=0, column=0, sticky="nsew")
+        photos_tree_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        tree_container.columnconfigure(0, weight=1)
+        tree_container.rowconfigure(0, weight=1)
         self.photos_tree.bind("<<TreeviewSelect>>", self.on_photo_selection_changed)
 
         actions_row = ttk.Frame(list_frame)
@@ -316,6 +361,7 @@ class MillerPicDesktopApp:
         self.thumbnail_preview_label.pack(side=LEFT)
         ttk.Label(thumbnail_frame, textvariable=self.thumbnail_status_var).pack(side=LEFT, padx=(12, 0))
 
+        list_frame.columnconfigure(0, weight=1)
         list_frame.columnconfigure(1, weight=1)
 
         output_frame = ttk.LabelFrame(container, text="Output", padding=10)
@@ -356,6 +402,128 @@ class MillerPicDesktopApp:
 
     def _oauth_client_file(self):
         return os.environ.get("MILLERPIC_GOOGLE_OAUTH_CLIENT_FILE") or DEFAULT_OAUTH_CLIENT_FILE
+
+    def _auth_state_file_path(self):
+        return os.environ.get("MILLERPIC_AUTH_STATE_FILE") or DEFAULT_AUTH_STATE_FILE
+
+    def _dpapi_protect(self, plaintext):
+        if os.name != "nt":
+            return None
+
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        in_buffer = ctypes.create_string_buffer(plaintext)
+        in_blob = self._DataBlob(len(plaintext), ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_byte)))
+        out_blob = self._DataBlob()
+
+        if not crypt32.CryptProtectData(
+            ctypes.byref(in_blob),
+            "MillerPicAuthSession",
+            None,
+            None,
+            None,
+            0,
+            ctypes.byref(out_blob),
+        ):
+            return None
+
+        try:
+            return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        finally:
+            kernel32.LocalFree(out_blob.pbData)
+
+    def _dpapi_unprotect(self, protected_bytes):
+        if os.name != "nt":
+            return None
+
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        in_buffer = ctypes.create_string_buffer(protected_bytes)
+        in_blob = self._DataBlob(len(protected_bytes), ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_byte)))
+        out_blob = self._DataBlob()
+
+        if not crypt32.CryptUnprotectData(
+            ctypes.byref(in_blob),
+            None,
+            None,
+            None,
+            None,
+            0,
+            ctypes.byref(out_blob),
+        ):
+            return None
+
+        try:
+            return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        finally:
+            kernel32.LocalFree(out_blob.pbData)
+
+    def _save_google_session(self):
+        if not self.google_credentials:
+            return
+
+        if os.name != "nt":
+            return
+
+        try:
+            raw_json = self.google_credentials.to_json()
+            protected = self._dpapi_protect(raw_json.encode("utf-8"))
+            if not protected:
+                self.log("Could not securely persist auth session (DPAPI protect failed).")
+                return
+
+            target_path = self._auth_state_file_path()
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(target_path, "wb") as output:
+                output.write(protected)
+        except Exception as error:
+            self.log(f"Failed to persist auth session: {error}")
+
+    def _clear_google_session(self):
+        try:
+            target_path = self._auth_state_file_path()
+            if os.path.isfile(target_path):
+                os.remove(target_path)
+        except Exception as error:
+            self.log(f"Failed to clear saved auth session: {error}")
+
+    def _restore_google_session_if_available(self):
+        if os.name != "nt":
+            return
+
+        target_path = self._auth_state_file_path()
+        if not os.path.isfile(target_path):
+            return
+
+        try:
+            with open(target_path, "rb") as source:
+                encrypted = source.read()
+
+            decrypted = self._dpapi_unprotect(encrypted)
+            if not decrypted:
+                self.log("Saved auth session could not be decrypted. Please sign in again.")
+                self._clear_google_session()
+                return
+
+            payload = json.loads(decrypted.decode("utf-8"))
+            credentials = GoogleOAuthCredentials.from_authorized_user_info(payload, scopes=GOOGLE_OAUTH_SCOPES)
+
+            if credentials.expired and credentials.refresh_token:
+                credentials.refresh(GoogleAuthRequest())
+
+            if (not credentials.id_token) and credentials.refresh_token:
+                credentials.refresh(GoogleAuthRequest())
+
+            if credentials.expired or not credentials.id_token:
+                self.log("Saved auth session is expired. Please sign in again.")
+                self._clear_google_session()
+                return
+
+            self._apply_google_credentials(credentials)
+            self.log("Restored Google session from secure local storage.")
+        except Exception as error:
+            self.log(f"Saved auth session restore failed: {error}")
+            self._clear_google_session()
 
     def on_google_sign_in(self):
         self._run_in_thread(self._google_sign_in_flow)
@@ -409,11 +577,13 @@ class MillerPicDesktopApp:
             expiry_text = "unknown"
 
         self.auth_status_var.set(f"Signed in (expires: {expiry_text})")
+        self._save_google_session()
         self.log("Google sign-in complete. Token field updated.")
 
     def on_google_sign_out(self):
         self.google_credentials = None
         self.id_token_var.set("")
+        self._clear_google_session()
         self.auth_status_var.set("Not signed in")
         self.log("Signed out locally (token cleared).")
 
@@ -758,6 +928,7 @@ class MillerPicDesktopApp:
 
                         existing_skip = self._queue_find_item(path_key, "SKIPPED_VIDEO")
                         if existing_skip:
+                            existing_skip.setdefault("curation", "REJECT")
                             existing_skip["message"] = reason
                             self._queue_update_item(existing_skip["photoId"], "SKIPPED_VIDEO", reason)
                         else:
@@ -765,6 +936,7 @@ class MillerPicDesktopApp:
                                 "filePath": file_path,
                                 "fileName": file_name,
                                 "photoId": uuid.uuid4().hex,
+                                "curation": "REJECT",
                                 "status": "SKIPPED_VIDEO",
                                 "message": reason,
                                 "pathKey": path_key,
@@ -802,6 +974,7 @@ class MillerPicDesktopApp:
                         "filePath": file_path,
                         "fileName": file_name,
                         "photoId": uuid.uuid4().hex,
+                        "curation": "KEEP",
                         "status": "QUEUED",
                         "message": "sync-new",
                         "pathKey": path_key,
@@ -858,6 +1031,7 @@ class MillerPicDesktopApp:
                     "filePath": file_path,
                     "fileName": file_name,
                     "photoId": uuid.uuid4().hex,
+                    "curation": "KEEP",
                     "status": "QUEUED",
                     "message": "",
                     "pathKey": self._normalize_path(file_path),
@@ -937,9 +1111,12 @@ class MillerPicDesktopApp:
         if not headers:
             return
 
-        queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
+        queued_items = [
+            item for item in self.upload_queue_items
+            if item.get("status") == "QUEUED" and (item.get("curation") or "KEEP") == "KEEP"
+        ]
         if not queued_items:
-            self.log("No queued files to upload.")
+            self.log("No KEEP-queued files to upload.")
             return
 
         max_parallel = self._get_queue_parallelism()
@@ -965,6 +1142,7 @@ class MillerPicDesktopApp:
             self.queue_tree.delete(item_id)
 
         status_filter = (self.queue_status_filter_var.get() or "ALL").strip().upper()
+        curation_filter = (self.queue_curation_filter_var.get() or "ALL").strip().upper()
         search_filter = (self.queue_search_filter_var.get() or "").strip().lower()
 
         for item in self.upload_queue_items:
@@ -972,9 +1150,14 @@ class MillerPicDesktopApp:
             file_name = item.get("fileName") or os.path.basename(file_path)
             item["fileName"] = file_name
             status = (item.get("status") or "").upper()
+            curation = (item.get("curation") or "KEEP").upper()
+            item["curation"] = curation
             message = item.get("message") or ""
 
             if status_filter != "ALL" and status != status_filter:
+                continue
+
+            if curation_filter != "ALL" and curation != curation_filter:
                 continue
 
             if search_filter and search_filter not in file_name.lower() and search_filter not in message.lower():
@@ -984,7 +1167,7 @@ class MillerPicDesktopApp:
                 "",
                 "end",
                 iid=item["photoId"],
-                values=(file_name, status, message),
+                values=(file_name, curation, status, message),
             )
 
     def _queue_update_item(self, photo_id, status, message=""):
@@ -998,8 +1181,89 @@ class MillerPicDesktopApp:
 
     def on_reset_queue_filters(self):
         self.queue_status_filter_var.set("ALL")
+        self.queue_curation_filter_var.set("ALL")
         self.queue_search_filter_var.set("")
         self._schedule_queue_refresh()
+
+    def _get_selected_queue_items(self):
+        selected_ids = self.queue_tree.selection()
+        if not selected_ids:
+            return []
+
+        selected_set = set(selected_ids)
+        return [item for item in self.upload_queue_items if item.get("photoId") in selected_set]
+
+    def _set_selected_queue_curation(self, curation_value):
+        selected_items = self._get_selected_queue_items()
+        if not selected_items:
+            messagebox.showerror("No selection", "Select one or more queue rows first.")
+            return
+
+        updated = 0
+        for item in selected_items:
+            current_status = (item.get("status") or "").upper()
+            if current_status == "UPLOADING":
+                continue
+            item["curation"] = curation_value
+            updated += 1
+
+        self._schedule_queue_refresh()
+        self.log(f"Updated curation to {curation_value} for {updated} queue item(s).")
+
+    def on_mark_selected_keep(self):
+        self._set_selected_queue_curation("KEEP")
+
+    def on_mark_selected_reject(self):
+        self._set_selected_queue_curation("REJECT")
+
+    def on_delete_rejected_local_files(self):
+        rejected_items = [
+            item for item in self.upload_queue_items
+            if (item.get("curation") or "KEEP") == "REJECT" and (item.get("status") or "").upper() != "UPLOADING"
+        ]
+
+        if not rejected_items:
+            self.log("No REJECT items available for local delete.")
+            return
+
+        confirmed = messagebox.askyesno(
+            "Delete rejected local files",
+            f"Delete {len(rejected_items)} rejected local file(s) from disk?\n\nThis cannot be undone.",
+        )
+        if not confirmed:
+            return
+
+        deleted = 0
+        failed = 0
+        removed_photo_ids = set()
+        for item in rejected_items:
+            file_path = item.get("filePath")
+            path_key = item.get("pathKey")
+            photo_id = item.get("photoId")
+            if not file_path:
+                failed += 1
+                continue
+
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                deleted += 1
+                if path_key and path_key in self.synced_files:
+                    self.synced_files.pop(path_key, None)
+                removed_photo_ids.add(photo_id)
+            except Exception as error:
+                failed += 1
+                item["status"] = "FAILED"
+                item["message"] = f"local delete failed: {error}"
+
+        if removed_photo_ids:
+            self.upload_queue_items = [
+                item for item in self.upload_queue_items if item.get("photoId") not in removed_photo_ids
+            ]
+
+        self._schedule_queue_refresh()
+        self._save_local_state()
+        self.log(f"Local delete complete for rejected files. Deleted={deleted}, Failed={failed}")
 
     def _clear_queue_items_by_status(self, statuses):
         status_set = {status.upper() for status in statuses}
@@ -1119,7 +1383,10 @@ class MillerPicDesktopApp:
         return True, "completed", False
 
     def _run_upload_queue_flow(self, headers, max_parallel):
-        queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
+        queued_items = [
+            item for item in self.upload_queue_items
+            if item.get("status") == "QUEUED" and (item.get("curation") or "KEEP") == "KEEP"
+        ]
         self.log(f"Starting folder upload queue with {len(queued_items)} files (parallel={max_parallel})...")
 
         stats = {
@@ -1442,26 +1709,27 @@ class MillerPicDesktopApp:
             self._clear_thumbnail_preview("Thumbnail preview: no selection")
             return
 
-        thumbnail_url = selected_photo.get("thumbnailUrl")
         photo_id = selected_photo.get("photoId") or "(unknown)"
-        if not thumbnail_url:
-            self._clear_thumbnail_preview(f"Thumbnail preview: none for {photo_id}")
-            return
-
         if Image is None or ImageTk is None:
             self._clear_thumbnail_preview("Thumbnail preview unavailable: Pillow not installed")
             return
 
         self.thumbnail_status_var.set(f"Loading thumbnail for {photo_id}...")
-        self._run_in_thread(self._load_thumbnail_preview_flow, thumbnail_url, photo_id)
+        headers = self._auth_headers_quiet()
+        self._run_in_thread(self._load_thumbnail_preview_flow, selected_photo, photo_id, headers)
 
     def _clear_thumbnail_preview(self, status_text):
         self.thumbnail_preview_image = None
         self.thumbnail_preview_label.configure(image="", text="No thumbnail loaded")
         self.thumbnail_status_var.set(status_text)
 
-    def _load_thumbnail_preview_flow(self, thumbnail_url, photo_id):
+    def _load_thumbnail_preview_flow(self, selected_photo, photo_id, headers):
         try:
+            thumbnail_url = self._resolve_list_thumbnail_url(selected_photo, headers)
+            if not thumbnail_url:
+                self.root.after(0, self._clear_thumbnail_preview, f"Thumbnail preview: none for {photo_id}")
+                return
+
             response = requests.get(thumbnail_url, timeout=30)
             if response.status_code != 200:
                 self.root.after(0, self._clear_thumbnail_preview, f"Thumbnail load failed: HTTP {response.status_code}")
@@ -1518,12 +1786,54 @@ class MillerPicDesktopApp:
             if response.status_code != 200:
                 return
 
-            self.log(f"Labels updated for photoId={photo_id}. Refreshing list...")
-            self.root.after(0, self.on_list_photos)
+            updated_subjects = payload.get("subjects") if isinstance(payload, dict) else None
+            self.log(f"Labels updated for photoId={photo_id}. Updating row without reloading thumbnails...")
+            self.root.after(0, self._apply_labels_update_locally, photo_id, updated_subjects)
         except requests.RequestException as error:
             self.log(f"Network error: {error}")
         except Exception as error:
             self.log(f"Unexpected error: {error}")
+
+    def _apply_labels_update_locally(self, photo_id, updated_subjects):
+        normalized_subjects = updated_subjects if isinstance(updated_subjects, list) else []
+
+        for photo in self.latest_photos:
+            if photo.get("photoId") == photo_id:
+                photo["subjects"] = normalized_subjects
+
+        for photo in self.display_photos:
+            if photo.get("photoId") == photo_id:
+                photo["subjects"] = normalized_subjects
+
+        selected_iid = None
+        selected = self.photos_tree.selection()
+        if selected:
+            selected_iid = selected[0]
+
+        for iid in self.photos_tree.get_children():
+            values = list(self.photos_tree.item(iid, "values"))
+            if len(values) < 6:
+                continue
+
+            row_photo_id = values[3]
+            if row_photo_id != photo_id:
+                continue
+
+            row_photo = None
+            index = int(iid)
+            if 0 <= index < len(self.display_photos):
+                row_photo = self.display_photos[index]
+
+            if row_photo:
+                values[0] = self._group_key_for_photo(row_photo, (self.group_mode_var.get() or "none").strip().lower())
+
+            values[2] = ", ".join(normalized_subjects)
+            self.photos_tree.item(iid, values=tuple(values))
+
+        if selected_iid:
+            self.photos_tree.selection_set(selected_iid)
+
+        self.label_editor_var.set(", ".join(normalized_subjects))
 
     def on_delete_selected_photo(self):
         selected_photo = self._get_selected_photo()
@@ -1733,7 +2043,7 @@ class MillerPicDesktopApp:
             self.list_current_token = requested_token
             self.list_next_token_var.set(next_token)
             self._set_list_status(page_count=len(photos), has_more=bool(next_token))
-            self.root.after(0, self._refresh_photos_table, photos)
+            self.root.after(0, self._refresh_photos_table, photos, headers)
 
             if photos:
                 first_photo_id = photos[0].get("photoId")
@@ -1780,7 +2090,7 @@ class MillerPicDesktopApp:
                 return
 
             photos = body.get("photos") or []
-            self.root.after(0, self._refresh_photos_table, photos)
+            self.root.after(0, self._refresh_photos_table, photos, headers)
 
             if photos:
                 first_photo_id = photos[0].get("photoId")
@@ -1795,7 +2105,7 @@ class MillerPicDesktopApp:
         except Exception as error:
             self.log(f"Unexpected error: {error}")
 
-    def _refresh_photos_table(self, photos):
+    def _refresh_photos_table(self, photos, auth_headers=None):
         self.latest_photos = photos
         group_mode = (self.group_mode_var.get() or "none").strip().lower()
         arranged_photos = list(photos)
@@ -1808,20 +2118,21 @@ class MillerPicDesktopApp:
             )
 
         self.display_photos = arranged_photos
+        self.list_thumbnail_images = {}
+        self.list_thumbnail_generation += 1
         for item_id in self.photos_tree.get_children():
             self.photos_tree.delete(item_id)
 
         for index, item in enumerate(arranged_photos):
             group_value = self._group_key_for_photo(item, group_mode)
             subjects = item.get("subjects") or []
-            has_thumbnail = "yes" if item.get("thumbnailUrl") else "no"
             self.photos_tree.insert(
                 "",
                 "end",
                 iid=str(index),
+                text="",
                 values=(
                     group_value,
-                    has_thumbnail,
                     item.get("fileName") or "",
                     ", ".join(subjects),
                     item.get("photoId") or "",
@@ -1832,6 +2143,103 @@ class MillerPicDesktopApp:
 
         if arranged_photos:
             self.photos_tree.selection_set("0")
+
+        self._start_list_thumbnail_hydration(arranged_photos, auth_headers, generation=self.list_thumbnail_generation)
+
+    def _auth_headers_quiet(self):
+        token = self.id_token_var.get().strip()
+        if not token:
+            return None
+        if token.lower().startswith("bearer "):
+            token = token[7:].strip()
+        if not token:
+            return None
+        return {"Authorization": f"Bearer {token}"}
+
+    def _resolve_list_thumbnail_url(self, photo, headers):
+        thumbnail_url = photo.get("thumbnailUrl")
+        if thumbnail_url:
+            return thumbnail_url
+
+        content_type = str(photo.get("contentType") or "").lower()
+        if not content_type.startswith("image/"):
+            return None
+
+        photo_id = photo.get("photoId")
+        if not photo_id or not headers:
+            return None
+
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos/{photo_id}/download-url"
+        response = requests.get(endpoint, headers=headers, timeout=20)
+        if response.status_code != 200:
+            return None
+        body = self._safe_json(response)
+        return body.get("downloadUrl")
+
+    def _start_list_thumbnail_hydration(self, photos, auth_headers, generation):
+        if Image is None or ImageTk is None:
+            self.thumbnail_status_var.set("List thumbnails unavailable: Pillow not installed")
+            return
+
+        headers = auth_headers or self._auth_headers_quiet()
+        if not headers:
+            self.thumbnail_status_var.set("List thumbnails unavailable: not authenticated")
+            return
+
+        self.thumbnail_status_var.set("Loading list thumbnails...")
+        self._run_in_thread(self._hydrate_list_thumbnails_flow, photos, headers, generation)
+
+    def _hydrate_list_thumbnails_flow(self, photos, headers, generation):
+        loaded = 0
+        attempted = 0
+
+        for index, photo in enumerate(photos):
+            if generation != self.list_thumbnail_generation:
+                return
+
+            content_type = str(photo.get("contentType") or "").lower()
+            if not content_type.startswith("image/"):
+                continue
+
+            attempted += 1
+            try:
+                thumbnail_url = self._resolve_list_thumbnail_url(photo, headers)
+                if not thumbnail_url:
+                    continue
+
+                response = requests.get(thumbnail_url, timeout=20)
+                if response.status_code != 200:
+                    continue
+
+                image_bytes = response.content
+                self.root.after(0, self._apply_list_thumbnail_image, str(index), image_bytes, generation)
+                loaded += 1
+            except Exception:
+                continue
+
+            if attempted >= 60:
+                break
+
+        if generation == self.list_thumbnail_generation:
+            self.root.after(0, self.thumbnail_status_var.set, f"List thumbnails loaded: {loaded}/{attempted}")
+
+    def _apply_list_thumbnail_image(self, iid, image_bytes, generation):
+        if generation != self.list_thumbnail_generation:
+            return
+
+        if iid not in self.photos_tree.get_children():
+            return
+
+        try:
+            with Image.open(BytesIO(image_bytes)) as image:
+                prepared = image.convert("RGB")
+                prepared.thumbnail((64, 64))
+                image_tk = ImageTk.PhotoImage(prepared)
+
+            self.list_thumbnail_images[iid] = image_tk
+            self.photos_tree.item(iid, image=image_tk)
+        except Exception:
+            return
 
     def _get_selected_photo(self):
         selected = self.photos_tree.selection()
