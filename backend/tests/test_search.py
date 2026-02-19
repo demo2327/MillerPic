@@ -58,6 +58,32 @@ def valid_event():
 
 
 class TestSearch:
+    def test_search_matches_subject_labels_case_insensitive(self, dynamodb_table, mock_env, valid_event):
+        now = datetime.now(timezone.utc).isoformat()
+        dynamodb_table.put_item(
+            Item={
+                "UserId": "user-123",
+                "PhotoId": "subject-1",
+                "OriginalFileName": "kitchen-receipt.jpg",
+                "ObjectKey": "originals/user-123/subject-1.jpg",
+                "ContentType": "image/jpeg",
+                "CreatedAt": now,
+                "Status": "ACTIVE",
+                "Subjects": ["receipt", "temporary"],
+            }
+        )
+
+        event = valid_event.copy()
+        event["queryStringParameters"] = {"q": "RECEIPT", "limit": "20"}
+
+        response = search.handler(event, None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["count"] == 1
+        assert body["photos"][0]["photoId"] == "subject-1"
+        assert body["photos"][0]["subjects"] == ["receipt", "temporary"]
+
     def test_search_matches_legacy_rows_without_original_file_name(self, dynamodb_table, mock_env, valid_event):
         now = datetime.now(timezone.utc).isoformat()
         dynamodb_table.put_item(

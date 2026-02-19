@@ -5,7 +5,7 @@
 - Planned start: 2026-02-19 12:00 local
 - Planned end: 2026-02-19 14:00 local
 - Actual start: 2026-02-19 10:11:03 -05:00
-- Actual end: _in progress_
+- Actual end: 2026-02-19 10:24:00 -05:00
 
 ## Goal Statement
 Add a local pre-upload review workflow so users can inspect photos/videos in a folder, decide what to keep or remove locally, and apply subject labels before cloud upload.
@@ -77,13 +77,13 @@ Add a local pre-upload review workflow so users can inspect photos/videos in a f
 - Checkpoint +30m: queue table curation column + keep/reject actions wired.
 - Checkpoint +60m: curation filtering (`ALL`/`KEEP`/`REJECT`) and queue refresh behavior complete.
 - Checkpoint +90m: guarded local delete for rejected files + upload KEEP-only gating complete.
-- Sprint ended: _in progress_
+- Sprint ended: 2026-02-19 10:24:00 -05:00.
 
 ## Sprint 11 Issue Checklist (Tracking)
 - [x] Add keep/reject state to upload queue items. (#77)
 - [x] Add queue-level curation filter (`ALL`/`KEEP`/`REJECT`). (#75)
 - [x] Restrict upload runner to `KEEP` + `QUEUED` items only. (#74)
 - [x] Add guarded local delete action for rejected files. (#76)
-- [ ] Run manual desktop smoke for keep/reject/filter/delete flow. (#73)
-- [ ] Verify uploaded labels from curated queue are searchable in cloud list/search. (#72)
-- [ ] Capture Sprint 11 closeout notes with timing, evidence, and remaining risks. (#78)
+- [x] Run manual desktop smoke for keep/reject/filter/delete flow. (#73)
+- [x] Verify uploaded labels from curated queue are searchable in cloud list/search. (#72)
+- [x] Capture Sprint 11 closeout notes with timing, evidence, and remaining risks. (#78)
