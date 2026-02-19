@@ -10,15 +10,15 @@ Build a local review and cleanup workflow that lets users inspect folder images/
 
 Success signal: users reduce upload noise and improve search quality with better labels.
 
-## Sprint 12 - Stand Up the Planning Operating System
-Create the project management system using Jira + Confluence free tier patterns: backlog, sprint planning, execution tracking, closeouts, decision logs, and defect workflow tied to testing evidence.
+## Sprint 12 - Remove Desktop Thumbnail Refresh Bottleneck
+Improve desktop list refresh performance so thumbnails appear quickly during cloud-library curation, with concurrent loading and in-session thumbnail caching.
 
-Success signal: future sprints run from a repeatable system, not ad-hoc coordination.
+Success signal: list refresh is no longer painfully slow for typical image-heavy pages.
 
 ## Sequencing Logic
 1. Sprint 10 improves cloud-side management and retrieval confidence.
 2. Sprint 11 improves upstream data quality before upload.
-3. Sprint 12 institutionalizes how work is planned and tracked.
+3. Sprint 12 removes UI latency friction before process tooling migration.
 
 ## Guardrails to Keep 2-Hour Sprints Ambitious
 - Minimum completion bar per sprint: at least 3 code deliverables plus validation.
