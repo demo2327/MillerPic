@@ -373,6 +373,9 @@ resource "aws_iam_policy" "terraform_deployer" {
         Action = [
           "apigateway:*",
           "budgets:*",
+          "cloudtrail:DescribeTrails",
+          "cloudtrail:GetTrailStatus",
+          "cloudtrail:LookupEvents",
           "cloudwatch:*",
           "dynamodb:*",
           "ec2:DescribeSubnets",
