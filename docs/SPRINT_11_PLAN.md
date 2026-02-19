@@ -80,10 +80,10 @@ Add a local pre-upload review workflow so users can inspect photos/videos in a f
 - Sprint ended: _in progress_
 
 ## Sprint 11 Issue Checklist (Tracking)
-- [x] Add keep/reject state to upload queue items.
-- [x] Add queue-level curation filter (`ALL`/`KEEP`/`REJECT`).
-- [x] Restrict upload runner to `KEEP` + `QUEUED` items only.
-- [x] Add guarded local delete action for rejected files.
-- [ ] Run manual desktop smoke for keep/reject/filter/delete flow.
-- [ ] Verify uploaded labels from curated queue are searchable in cloud list/search.
-- [ ] Capture Sprint 11 closeout notes with timing, evidence, and remaining risks.
+- [x] Add keep/reject state to upload queue items. (#77)
+- [x] Add queue-level curation filter (`ALL`/`KEEP`/`REJECT`). (#75)
+- [x] Restrict upload runner to `KEEP` + `QUEUED` items only. (#74)
+- [x] Add guarded local delete action for rejected files. (#76)
+- [ ] Run manual desktop smoke for keep/reject/filter/delete flow. (#73)
+- [ ] Verify uploaded labels from curated queue are searchable in cloud list/search. (#72)
+- [ ] Capture Sprint 11 closeout notes with timing, evidence, and remaining risks. (#78)
