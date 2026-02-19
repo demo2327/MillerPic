@@ -19,8 +19,10 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials as GoogleOAuthCredentials
 import requests
 from thumbnail_hydration import (
+    LIST_THUMBNAIL_CACHE_MAX_ITEMS,
     LIST_THUMBNAIL_MAX_ATTEMPTS,
     build_thumbnail_candidates,
+    cache_put_bounded,
     count_cached_rows,
     count_image_rows,
 )
@@ -60,6 +62,7 @@ DEFAULT_AUTH_STATE_FILE = os.path.join(
 )
 LIST_THUMBNAIL_WORKERS = 6
 LIST_THUMBNAIL_TIMEOUT_SECONDS = 8
+LIST_THUMBNAIL_URL_TIMEOUT_SECONDS = 6
 
 
 def pretty_json(value):
@@ -102,6 +105,7 @@ class MillerPicDesktopApp:
         self.list_thumbnail_images = {}
         self.list_thumbnail_generation = 0
         self.list_thumbnail_bytes_cache = {}
+        self.list_thumbnail_url_cache = {}
         self.upload_queue_items = []
         self.upload_queue_running = False
         self.upload_queue_lock = threading.Lock()
@@ -2184,12 +2188,24 @@ class MillerPicDesktopApp:
         if not photo_id or not headers:
             return None
 
+        cached_url = self.list_thumbnail_url_cache.get(photo_id)
+        if cached_url:
+            return cached_url
+
         endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos/{photo_id}/download-url"
-        response = requests.get(endpoint, headers=headers, timeout=20)
+        response = requests.get(endpoint, headers=headers, timeout=LIST_THUMBNAIL_URL_TIMEOUT_SECONDS)
         if response.status_code != 200:
             return None
         body = self._safe_json(response)
-        return body.get("downloadUrl")
+        resolved_url = body.get("downloadUrl")
+        if resolved_url:
+            cache_put_bounded(
+                self.list_thumbnail_url_cache,
+                photo_id,
+                resolved_url,
+                max_items=LIST_THUMBNAIL_CACHE_MAX_ITEMS,
+            )
+        return resolved_url
 
     def _start_list_thumbnail_hydration(self, photos, auth_headers, generation):
         if Image is None or ImageTk is None:
@@ -2241,7 +2257,12 @@ class MillerPicDesktopApp:
                     continue
 
                 if photo_id:
-                    self.list_thumbnail_bytes_cache[photo_id] = image_bytes
+                    cache_put_bounded(
+                        self.list_thumbnail_bytes_cache,
+                        photo_id,
+                        image_bytes,
+                        max_items=LIST_THUMBNAIL_CACHE_MAX_ITEMS,
+                    )
                 self.root.after(0, self._apply_list_thumbnail_image, str(index), image_bytes, generation)
                 loaded += 1
 

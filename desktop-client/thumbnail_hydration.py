@@ -1,4 +1,5 @@
 LIST_THUMBNAIL_MAX_ATTEMPTS = 24
+LIST_THUMBNAIL_CACHE_MAX_ITEMS = 300
 
 
 def is_image_content_type(content_type):
@@ -36,3 +37,14 @@ def count_cached_rows(photos, bytes_cache):
         if photo_id and photo_id in cache:
             count += 1
     return count
+
+
+def cache_put_bounded(cache, key, value, max_items=LIST_THUMBNAIL_CACHE_MAX_ITEMS):
+    if cache is None or not key or value is None:
+        return
+
+    cache[key] = value
+    max_size = max(1, int(max_items or LIST_THUMBNAIL_CACHE_MAX_ITEMS))
+    while len(cache) > max_size:
+        oldest_key = next(iter(cache))
+        cache.pop(oldest_key, None)

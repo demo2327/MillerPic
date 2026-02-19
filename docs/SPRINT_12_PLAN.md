@@ -1,5 +1,12 @@
 # Sprint 12 Plan - Desktop Thumbnail Performance
 
+## Sprint Window (Timestamped)
+- Planned duration: 120 minutes
+- Planned start: 2026-02-19 10:30 local
+- Planned end: 2026-02-19 12:30 local
+- Actual start: 2026-02-19 10:44:00 -05:00
+- Actual end: 2026-02-19 12:48:39 -05:00
+
 ## Goal Statement
 Reduce list-refresh latency in the desktop client so thumbnail-heavy pages become responsive enough for daily use.
 
@@ -56,3 +63,19 @@ Network RTT and signed-URL generation still affect first-load latency; optimizat
 - Desktop list thumbnails load concurrently with visible progressive improvement.
 - Cache reuse is active during the current app session.
 - Compile validation passes and closeout evidence is documented.
+
+## Execution Checkpoints
+- Sprint started: 2026-02-19 10:44:00 -05:00.
+- Checkpoint +45m: extracted thumbnail hydration helper + initial unit tests in place.
+- Checkpoint +90m: app wired to helper with concurrent fetch + bytes cache reuse.
+- Checkpoint +120m: bounded cache hardening for bytes and URL cache complete.
+- Sprint ended: 2026-02-19 12:48:39 -05:00.
+
+## Sprint 12 Checklist (Tracking)
+- [x] Extract pure thumbnail hydration candidate logic.
+- [x] Add automated tests for candidate/cache behaviors.
+- [x] Run concurrent thumbnail fetch pipeline.
+- [x] Reuse in-session thumbnail bytes cache on refresh.
+- [x] Add bounded cache guardrails to avoid unbounded growth.
+- [x] Add cached resolved download URLs for repeat fetch reduction.
+- [x] Compile + test validation evidence captured.
