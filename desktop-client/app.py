@@ -8,7 +8,7 @@ import uuid
 import webbrowser
 import ctypes
 from ctypes import wintypes
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from io import BytesIO
 from tkinter import END, BOTH, LEFT, RIGHT, X, Y, filedialog, messagebox, ttk
@@ -18,6 +18,12 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials as GoogleOAuthCredentials
 import requests
+from thumbnail_hydration import (
+    LIST_THUMBNAIL_MAX_ATTEMPTS,
+    build_thumbnail_candidates,
+    count_cached_rows,
+    count_image_rows,
+)
 
 try:
     from PIL import ExifTags, Image, ImageTk
@@ -52,6 +58,8 @@ DEFAULT_AUTH_STATE_FILE = os.path.join(
     "MillerPic",
     "auth_state.bin",
 )
+LIST_THUMBNAIL_WORKERS = 6
+LIST_THUMBNAIL_TIMEOUT_SECONDS = 8
 
 
 def pretty_json(value):
@@ -93,6 +101,7 @@ class MillerPicDesktopApp:
         self.thumbnail_preview_image = None
         self.list_thumbnail_images = {}
         self.list_thumbnail_generation = 0
+        self.list_thumbnail_bytes_cache = {}
         self.upload_queue_items = []
         self.upload_queue_running = False
         self.upload_queue_lock = threading.Lock()
@@ -2141,6 +2150,12 @@ class MillerPicDesktopApp:
                 ),
             )
 
+            photo_id = item.get("photoId")
+            content_type = str(item.get("contentType") or "").lower()
+            cached_thumbnail_bytes = self.list_thumbnail_bytes_cache.get(photo_id)
+            if photo_id and content_type.startswith("image/") and cached_thumbnail_bytes:
+                self._apply_list_thumbnail_image(str(index), cached_thumbnail_bytes, self.list_thumbnail_generation)
+
         if arranged_photos:
             self.photos_tree.selection_set("0")
 
@@ -2193,35 +2208,51 @@ class MillerPicDesktopApp:
         loaded = 0
         attempted = 0
 
-        for index, photo in enumerate(photos):
-            if generation != self.list_thumbnail_generation:
-                return
+        candidates = build_thumbnail_candidates(
+            photos,
+            self.list_thumbnail_bytes_cache,
+            max_attempts=LIST_THUMBNAIL_MAX_ATTEMPTS,
+        )
 
-            content_type = str(photo.get("contentType") or "").lower()
-            if not content_type.startswith("image/"):
-                continue
-
-            attempted += 1
+        def _fetch_one(index_photo):
+            index, photo = index_photo
             try:
                 thumbnail_url = self._resolve_list_thumbnail_url(photo, headers)
                 if not thumbnail_url:
-                    continue
+                    return index, photo.get("photoId"), None
 
-                response = requests.get(thumbnail_url, timeout=20)
+                response = requests.get(thumbnail_url, timeout=LIST_THUMBNAIL_TIMEOUT_SECONDS)
                 if response.status_code != 200:
+                    return index, photo.get("photoId"), None
+
+                return index, photo.get("photoId"), response.content
+            except Exception:
+                return index, photo.get("photoId"), None
+
+        with ThreadPoolExecutor(max_workers=LIST_THUMBNAIL_WORKERS) as executor:
+            futures = [executor.submit(_fetch_one, candidate) for candidate in candidates]
+            for future in as_completed(futures):
+                if generation != self.list_thumbnail_generation:
+                    return
+
+                attempted += 1
+                index, photo_id, image_bytes = future.result()
+                if not image_bytes:
                     continue
 
-                image_bytes = response.content
+                if photo_id:
+                    self.list_thumbnail_bytes_cache[photo_id] = image_bytes
                 self.root.after(0, self._apply_list_thumbnail_image, str(index), image_bytes, generation)
                 loaded += 1
-            except Exception:
-                continue
-
-            if attempted >= 60:
-                break
 
         if generation == self.list_thumbnail_generation:
-            self.root.after(0, self.thumbnail_status_var.set, f"List thumbnails loaded: {loaded}/{attempted}")
+            total_images = count_image_rows(photos)
+            cached_count = count_cached_rows(photos, self.list_thumbnail_bytes_cache)
+            self.root.after(
+                0,
+                self.thumbnail_status_var.set,
+                f"List thumbnails ready: {cached_count}/{total_images} (fetched {loaded}/{attempted})",
+            )
 
     def _apply_list_thumbnail_image(self, iid, image_bytes, generation):
         if generation != self.list_thumbnail_generation:
