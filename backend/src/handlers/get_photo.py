@@ -100,14 +100,21 @@ def handler(event, context):
             photo["takenAt"] = taken_at
 
         thumbnail_key = item.get("ThumbnailKey")
+        thumbnail_source_key = thumbnail_key
+        content_type = str(item.get("ContentType") or "").lower()
+        if not thumbnail_source_key and content_type.startswith("image/"):
+            thumbnail_source_key = item.get("ObjectKey")
+
         if thumbnail_key:
             photo["thumbnailKey"] = thumbnail_key
+
+        if thumbnail_source_key:
             try:
                 photo["thumbnailUrl"] = s3.generate_presigned_url(
                     "get_object",
                     Params={
                         "Bucket": PHOTO_BUCKET,
-                        "Key": thumbnail_key,
+                        "Key": thumbnail_source_key,
                     },
                     ExpiresIn=3600,
                 )
