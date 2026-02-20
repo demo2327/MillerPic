@@ -245,6 +245,125 @@ paths:
                     type: integer
                   nextToken:
                     type: string
+  /albums:
+    get:
+      summary: List label-defined albums
+      description: List album definitions (saved required label rules) for the authenticated user
+      responses:
+        '200':
+          description: Album list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  albums:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        albumId:
+                          type: string
+                        name:
+                          type: string
+                        requiredLabels:
+                          type: array
+                          items:
+                            type: string
+                        createdAt:
+                          type: string
+                          format: date-time
+                        updatedAt:
+                          type: string
+                          format: date-time
+                  count:
+                    type: integer
+    post:
+      summary: Create label-defined album
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, requiredLabels]
+              properties:
+                name:
+                  type: string
+                requiredLabels:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Album created
+  /albums/{albumId}/photos:
+    get:
+      summary: List photos derived for album
+      description: Return photos whose labels include all album requiredLabels
+      parameters:
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Derived album photos
+        '404':
+          description: Album not found
+  /albums/{albumId}/photos/{photoId}/apply-labels:
+    post:
+      summary: Add missing album labels to photo
+      parameters:
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Labels applied
+        '404':
+          description: Album or photo not found
+  /albums/{albumId}/photos/{photoId}/remove-labels:
+    post:
+      summary: Remove selected album labels from photo
+      parameters:
+        - in: path
+          name: albumId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [labels]
+              properties:
+                labels:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Labels removed
+        '400':
+          description: Invalid labels request
+        '404':
+          description: Album or photo not found
 components:
   securitySchemes:
     bearerAuth:

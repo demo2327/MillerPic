@@ -99,6 +99,46 @@ resource "aws_apigatewayv2_integration" "get_photo" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "albums_create" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.albums_create.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "albums_list" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.albums_list.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "albums_photos" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.albums_photos.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "albums_apply_labels" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.albums_apply_labels.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "albums_remove_labels" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_method     = "POST"
+  integration_uri        = aws_lambda_function.albums_remove_labels.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "upload" {
   api_id             = aws_apigatewayv2_api.http_api.id
   route_key          = "POST /photos/upload-url"
@@ -175,6 +215,46 @@ resource "aws_apigatewayv2_route" "search" {
   api_id             = aws_apigatewayv2_api.http_api.id
   route_key          = "GET /photos/search"
   target             = "integrations/${aws_apigatewayv2_integration.search.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "albums_create" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "POST /albums"
+  target             = "integrations/${aws_apigatewayv2_integration.albums_create.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "albums_list" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "GET /albums"
+  target             = "integrations/${aws_apigatewayv2_integration.albums_list.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "albums_photos" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "GET /albums/{albumId}/photos"
+  target             = "integrations/${aws_apigatewayv2_integration.albums_photos.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "albums_apply_labels" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "POST /albums/{albumId}/photos/{photoId}/apply-labels"
+  target             = "integrations/${aws_apigatewayv2_integration.albums_apply_labels.id}"
+  authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
+  authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+}
+
+resource "aws_apigatewayv2_route" "albums_remove_labels" {
+  api_id             = aws_apigatewayv2_api.http_api.id
+  route_key          = "POST /albums/{albumId}/photos/{photoId}/remove-labels"
+  target             = "integrations/${aws_apigatewayv2_integration.albums_remove_labels.id}"
   authorization_type = var.enable_jwt_auth ? "JWT" : "NONE"
   authorizer_id      = var.enable_jwt_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
@@ -287,6 +367,46 @@ resource "aws_lambda_permission" "allow_apigw_search" {
   statement_id  = "AllowAPIGatewayInvokeSearch"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.search.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_albums_create" {
+  statement_id  = "AllowAPIGatewayInvokeAlbumsCreate"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.albums_create.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_albums_list" {
+  statement_id  = "AllowAPIGatewayInvokeAlbumsList"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.albums_list.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_albums_photos" {
+  statement_id  = "AllowAPIGatewayInvokeAlbumsPhotos"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.albums_photos.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_albums_apply_labels" {
+  statement_id  = "AllowAPIGatewayInvokeAlbumsApplyLabels"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.albums_apply_labels.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "allow_apigw_albums_remove_labels" {
+  statement_id  = "AllowAPIGatewayInvokeAlbumsRemoveLabels"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.albums_remove_labels.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

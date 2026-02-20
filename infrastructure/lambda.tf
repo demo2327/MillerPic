@@ -174,6 +174,11 @@ resource "aws_iam_policy" "app_policy" {
       },
       {
         Effect   = "Allow"
+        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem", "dynamodb:DeleteItem"]
+        Resource = aws_dynamodb_table.albums.arn
+      },
+      {
+        Effect   = "Allow"
         Action   = ["sqs:SendMessage"]
         Resource = aws_sqs_queue.lambda_dlq.arn
       }
@@ -489,6 +494,160 @@ resource "aws_lambda_function" "get_photo" {
 
   environment {
     variables = {
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "albums_create" {
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  function_name                  = "${var.project_name}-albums-create-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "albums_create.handler"
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "albums_create", "signed/albums_create.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "albums_create", null)
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
+
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
+  }
+
+  environment {
+    variables = {
+      ALBUMS_TABLE = aws_dynamodb_table.albums.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "albums_list" {
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  function_name                  = "${var.project_name}-albums-list-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "albums_list.handler"
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "albums_list", "signed/albums_list.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "albums_list", null)
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
+
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
+  }
+
+  environment {
+    variables = {
+      ALBUMS_TABLE = aws_dynamodb_table.albums.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "albums_photos" {
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  function_name                  = "${var.project_name}-albums-photos-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "albums_photos.handler"
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "albums_photos", "signed/albums_photos.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "albums_photos", null)
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
+
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
+  }
+
+  environment {
+    variables = {
+      ALBUMS_TABLE = aws_dynamodb_table.albums.name
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+      PHOTO_BUCKET = aws_s3_bucket.photos.bucket
+    }
+  }
+}
+
+resource "aws_lambda_function" "albums_apply_labels" {
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  function_name                  = "${var.project_name}-albums-apply-labels-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "albums_apply_labels.handler"
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "albums_apply_labels", "signed/albums_apply_labels.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "albums_apply_labels", null)
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
+
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
+  }
+
+  environment {
+    variables = {
+      ALBUMS_TABLE = aws_dynamodb_table.albums.name
+      PHOTOS_TABLE = aws_dynamodb_table.photos.name
+    }
+  }
+}
+
+resource "aws_lambda_function" "albums_remove_labels" {
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  function_name                  = "${var.project_name}-albums-remove-labels-${var.environment}"
+  role                           = aws_iam_role.lambda_exec.arn
+  runtime                        = local.lambda_runtime
+  handler                        = "albums_remove_labels.handler"
+  s3_bucket                      = var.lambda_artifacts_bucket_name
+  s3_key                         = lookup(var.lambda_artifact_object_keys, "albums_remove_labels", "signed/albums_remove_labels.zip")
+  s3_object_version              = lookup(var.lambda_artifact_object_versions, "albums_remove_labels", null)
+  reserved_concurrent_executions = var.lambda_reserved_concurrency_per_function
+
+  kms_key_arn             = aws_kms_key.lambda_env.arn
+  code_signing_config_arn = aws_lambda_code_signing_config.millerpic.arn
+
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
+  vpc_config {
+    subnet_ids         = local.lambda_private_subnet_ids
+    security_group_ids = [aws_security_group.lambda_vpc.id]
+  }
+
+  environment {
+    variables = {
+      ALBUMS_TABLE = aws_dynamodb_table.albums.name
       PHOTOS_TABLE = aws_dynamodb_table.photos.name
     }
   }
