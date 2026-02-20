@@ -9,6 +9,7 @@ from moto import mock_aws
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from handlers import upload
+from handlers import upload_complete
 
 
 @pytest.fixture
@@ -167,3 +168,91 @@ class TestUpload:
         assert target_item["Status"] == "ACTIVE"
         assert target_item["ObjectKey"] == "originals/user-source/photo-source.webp"
         assert target_item["DeduplicatedFromPhotoId"] == "photo-source"
+
+
+class TestUploadCompleteDateLabels:
+    def test_upload_complete_adds_date_label_from_metadata(self, aws_resources, monkeypatch):
+        aws_resources["table"].put_item(
+            Item={
+                "UserId": "user-123",
+                "PhotoId": "photo-date-1",
+                "ObjectKey": "originals/user-123/photo-date-1.webp",
+                "ContentType": "image/webp",
+                "Status": "PENDING",
+                "Subjects": ["bob"],
+            }
+        )
+        aws_resources["s3"].put_object(
+            Bucket="photos-test-bucket",
+            Key="originals/user-123/photo-date-1.webp",
+            Body=b"fake-image-bytes",
+            ContentType="image/webp",
+        )
+
+        monkeypatch.setattr(upload_complete, "_load_source_bytes", lambda _key: b"fake-image-bytes")
+        monkeypatch.setattr(upload_complete, "_extract_date_label_from_image", lambda _bytes: "date:2024-04-12")
+        monkeypatch.setattr(upload_complete, "_try_generate_thumbnail", lambda **_kwargs: None)
+
+        event = {
+            "requestContext": {
+                "authorizer": {
+                    "jwt": {
+                        "claims": {
+                            "sub": "user-123",
+                            "email_verified": "true",
+                        }
+                    }
+                }
+            },
+            "body": json.dumps({"photoId": "photo-date-1"}),
+        }
+
+        response = upload_complete.handler(event, None)
+
+        assert response["statusCode"] == 200
+        item = aws_resources["table"].get_item(Key={"UserId": "user-123", "PhotoId": "photo-date-1"})["Item"]
+        assert item["Status"] == "ACTIVE"
+        assert item["Subjects"] == ["bob", "date:2024-04-12"]
+
+    def test_upload_complete_does_not_duplicate_existing_date_label(self, aws_resources, monkeypatch):
+        aws_resources["table"].put_item(
+            Item={
+                "UserId": "user-123",
+                "PhotoId": "photo-date-2",
+                "ObjectKey": "originals/user-123/photo-date-2.webp",
+                "ContentType": "image/webp",
+                "Status": "PENDING",
+                "Subjects": ["bob", "date:2024-04-12"],
+            }
+        )
+        aws_resources["s3"].put_object(
+            Bucket="photos-test-bucket",
+            Key="originals/user-123/photo-date-2.webp",
+            Body=b"fake-image-bytes",
+            ContentType="image/webp",
+        )
+
+        monkeypatch.setattr(upload_complete, "_load_source_bytes", lambda _key: b"fake-image-bytes")
+        monkeypatch.setattr(upload_complete, "_extract_date_label_from_image", lambda _bytes: "date:2024-04-12")
+        monkeypatch.setattr(upload_complete, "_try_generate_thumbnail", lambda **_kwargs: None)
+
+        event = {
+            "requestContext": {
+                "authorizer": {
+                    "jwt": {
+                        "claims": {
+                            "sub": "user-123",
+                            "email_verified": "true",
+                        }
+                    }
+                }
+            },
+            "body": json.dumps({"photoId": "photo-date-2"}),
+        }
+
+        response = upload_complete.handler(event, None)
+
+        assert response["statusCode"] == 200
+        item = aws_resources["table"].get_item(Key={"UserId": "user-123", "PhotoId": "photo-date-2"})["Item"]
+        assert item["Status"] == "ACTIVE"
+        assert item["Subjects"] == ["bob", "date:2024-04-12"]
