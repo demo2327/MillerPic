@@ -49,16 +49,21 @@ variable "lambda_artifact_object_keys" {
   description = "Map of Lambda handler names to signed S3 object keys"
   type        = map(string)
   default = {
-    upload          = "signed/upload.zip"
-    download        = "signed/download.zip"
-    list            = "signed/list.zip"
-    upload_complete = "signed/upload_complete.zip"
-    delete          = "signed/delete.zip"
-    trash           = "signed/trash.zip"
-    hard_delete     = "signed/hard_delete.zip"
-    patch_photo     = "signed/patch_photo.zip"
-    search          = "signed/search.zip"
-    get_photo       = "signed/get_photo.zip"
+    upload               = "signed/upload.zip"
+    download             = "signed/download.zip"
+    list                 = "signed/list.zip"
+    upload_complete      = "signed/upload_complete.zip"
+    delete               = "signed/delete.zip"
+    trash                = "signed/trash.zip"
+    hard_delete          = "signed/hard_delete.zip"
+    patch_photo          = "signed/patch_photo.zip"
+    search               = "signed/search.zip"
+    get_photo            = "signed/get_photo.zip"
+    albums_create        = "signed/albums_create.zip"
+    albums_list          = "signed/albums_list.zip"
+    albums_photos        = "signed/albums_photos.zip"
+    albums_apply_labels  = "signed/albums_apply_labels.zip"
+    albums_remove_labels = "signed/albums_remove_labels.zip"
   }
 }
 

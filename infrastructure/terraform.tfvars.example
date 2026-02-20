@@ -41,6 +41,11 @@ lambda_artifact_object_keys = {
   patch_photo     = "signed/patch_photo.zip"
   search          = "signed/search.zip"
   get_photo       = "signed/get_photo.zip"
+  albums_create        = "signed/albums_create.zip"
+  albums_list          = "signed/albums_list.zip"
+  albums_photos        = "signed/albums_photos.zip"
+  albums_apply_labels  = "signed/albums_apply_labels.zip"
+  albums_remove_labels = "signed/albums_remove_labels.zip"
 }
 
 # Populate from generated signing output before each Lambda deployment.
@@ -55,6 +60,11 @@ lambda_artifact_object_keys = {
 #   patch_photo     = "<S3-version-id>"
 #   search          = "<S3-version-id>"
 #   get_photo       = "<S3-version-id>"
+#   albums_create        = "<S3-version-id>"
+#   albums_list          = "<S3-version-id>"
+#   albums_photos        = "<S3-version-id>"
+#   albums_apply_labels  = "<S3-version-id>"
+#   albums_remove_labels = "<S3-version-id>"
 # }
 
 tags = {
