@@ -89,6 +89,9 @@ class MillerPicDesktopApp:
         self.list_status_var = tk.StringVar(value="Page 1 · No results yet")
         self.search_query_var = tk.StringVar()
         self.search_limit_var = tk.StringVar(value="20")
+        self.album_name_var = tk.StringVar()
+        self.album_required_labels_var = tk.StringVar()
+        self.album_status_var = tk.StringVar(value="Albums: none loaded")
         self.group_mode_var = tk.StringVar(value="none")
         self.label_editor_var = tk.StringVar()
         self.thumbnail_status_var = tk.StringVar(value="Thumbnail preview: none")
@@ -111,6 +114,10 @@ class MillerPicDesktopApp:
         self.upload_queue_lock = threading.Lock()
         self.managed_folders = []
         self.synced_files = {}
+        self.albums_by_id = {}
+        self.local_albums = []
+        self.albums_backend_available = None
+        self.current_album_context = None
         self._queue_refresh_scheduled = False
         self.google_credentials = None
 
@@ -287,6 +294,57 @@ class MillerPicDesktopApp:
 
         search_frame.columnconfigure(0, weight=1)
 
+        albums_frame = ttk.LabelFrame(container, text="Albums (Label-defined)", padding=10)
+        albums_frame.pack(fill=X, pady=(12, 0))
+
+        ttk.Label(albums_frame, text="Album Name").grid(row=0, column=0, sticky="w")
+        ttk.Entry(albums_frame, textvariable=self.album_name_var, width=30).grid(
+            row=1,
+            column=0,
+            sticky="w",
+            padx=(0, 10),
+        )
+
+        ttk.Label(albums_frame, text="Required Labels (comma-separated)").grid(row=0, column=1, sticky="w")
+        ttk.Entry(albums_frame, textvariable=self.album_required_labels_var, width=52).grid(
+            row=1,
+            column=1,
+            sticky="ew",
+            padx=(0, 10),
+        )
+
+        albums_actions = ttk.Frame(albums_frame)
+        albums_actions.grid(row=1, column=2, sticky="w")
+        ttk.Button(albums_actions, text="Create Album", command=self.on_create_album).pack(side=LEFT)
+        ttk.Button(albums_actions, text="Refresh Albums", command=self.on_refresh_albums).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(albums_actions, text="Delete Album", command=self.on_delete_selected_album).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(albums_actions, text="View Album Photos", command=self.on_view_selected_album_photos).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(albums_actions, text="Show All Photos", command=self.on_show_all_photos).pack(side=LEFT, padx=(8, 0))
+
+        ttk.Label(albums_frame, textvariable=self.album_status_var).grid(
+            row=2,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(6, 0),
+        )
+
+        self.albums_tree = ttk.Treeview(
+            albums_frame,
+            columns=("name", "requiredLabels", "albumId"),
+            show="headings",
+            height=4,
+        )
+        self.albums_tree.heading("name", text="Album")
+        self.albums_tree.heading("requiredLabels", text="Required Labels")
+        self.albums_tree.heading("albumId", text="Album ID")
+        self.albums_tree.column("name", width=220)
+        self.albums_tree.column("requiredLabels", width=420)
+        self.albums_tree.column("albumId", width=220)
+        self.albums_tree.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+
+        albums_frame.columnconfigure(1, weight=1)
+
         list_frame = ttk.LabelFrame(container, text="List Photos", padding=10)
         list_frame.pack(fill=X, pady=(12, 0))
 
@@ -352,6 +410,7 @@ class MillerPicDesktopApp:
         tree_container.columnconfigure(0, weight=1)
         tree_container.rowconfigure(0, weight=1)
         self.photos_tree.bind("<<TreeviewSelect>>", self.on_photo_selection_changed)
+        self.photos_tree.bind("<Button-3>", self.on_photos_tree_right_click)
 
         actions_row = ttk.Frame(list_frame)
         actions_row.grid(row=4, column=0, columnspan=4, sticky="w", pady=(8, 0))
@@ -384,6 +443,750 @@ class MillerPicDesktopApp:
         self.output_text.pack(fill=BOTH, expand=True)
 
         self.log("Desktop client ready.")
+
+    def _set_album_status(self, status_text):
+        self.album_status_var.set(status_text)
+
+    def _prompt_select_album(self, title_text="Choose album", include_local=True):
+        albums = list(self.albums_by_id.values())
+        if include_local:
+            local_by_id = {album.get("albumId"): album for album in self.local_albums}
+            for album in albums:
+                local_by_id[album.get("albumId")] = album
+            albums = [album for album in local_by_id.values() if album.get("albumId")]
+
+        if not albums:
+            messagebox.showerror("No albums", "Create an album first.")
+            return None
+
+        result = {"album": None}
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title_text)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(frame, text="Select album").pack(anchor="w")
+        combo_values = [f"{album.get('name')} ({', '.join(album.get('requiredLabels') or [])})" for album in albums]
+        selected_var = tk.StringVar(value=combo_values[0])
+        combo = ttk.Combobox(frame, values=combo_values, textvariable=selected_var, state="readonly", width=70)
+        combo.pack(fill=X, pady=(6, 0))
+
+        actions = ttk.Frame(frame)
+        actions.pack(fill=X, pady=(10, 0))
+
+        def _confirm():
+            idx = combo.current()
+            if idx < 0:
+                idx = 0
+            result["album"] = albums[idx]
+            dialog.destroy()
+
+        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side=RIGHT)
+        ttk.Button(actions, text="OK", command=_confirm).pack(side=RIGHT, padx=(0, 8))
+
+        dialog.wait_window()
+        return result["album"]
+
+    def _prompt_checklist_labels(self, title_text, labels, checked_labels):
+        unique_labels = self._dedupe_subjects(labels)
+        checked_set = self._normalize_label_set(checked_labels)
+        if not unique_labels:
+            return []
+
+        result = {"selected": None}
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title_text)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill=BOTH, expand=True)
+        ttk.Label(frame, text="Toggle labels").pack(anchor="w")
+
+        vars_by_label = {}
+        for label in unique_labels:
+            var = tk.BooleanVar(value=(label.lower() in checked_set))
+            vars_by_label[label] = var
+            ttk.Checkbutton(frame, text=label, variable=var).pack(anchor="w")
+
+        actions = ttk.Frame(frame)
+        actions.pack(fill=X, pady=(10, 0))
+
+        def _confirm():
+            selected = [label for label, var in vars_by_label.items() if var.get()]
+            result["selected"] = self._dedupe_subjects(selected)
+            dialog.destroy()
+
+        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side=RIGHT)
+        ttk.Button(actions, text="Apply", command=_confirm).pack(side=RIGHT, padx=(0, 8))
+
+        dialog.wait_window()
+        return result["selected"]
+
+    def _prompt_manage_labels(self, current_labels):
+        labels = self._dedupe_subjects(current_labels)
+        result = {"labels": None}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Manage Labels")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(frame, text="Current labels").pack(anchor="w")
+        vars_by_label = {}
+        for label in labels:
+            var = tk.BooleanVar(value=True)
+            vars_by_label[label] = var
+            ttk.Checkbutton(frame, text=label, variable=var).pack(anchor="w")
+
+        ttk.Label(frame, text="Add labels (comma-separated)").pack(anchor="w", pady=(10, 0))
+        add_var = tk.StringVar()
+        ttk.Entry(frame, textvariable=add_var, width=64).pack(fill=X, pady=(4, 0))
+
+        actions = ttk.Frame(frame)
+        actions.pack(fill=X, pady=(10, 0))
+
+        def _confirm():
+            kept = [label for label, var in vars_by_label.items() if var.get()]
+            added = self._parse_subjects_csv(add_var.get())
+            result["labels"] = self._dedupe_subjects(kept + added)
+            dialog.destroy()
+
+        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side=RIGHT)
+        ttk.Button(actions, text="Save", command=_confirm).pack(side=RIGHT, padx=(0, 8))
+
+        dialog.wait_window()
+        return result["labels"]
+
+    @staticmethod
+    def _is_not_found_status(status_code):
+        return int(status_code) == 404
+
+    @staticmethod
+    def _build_local_album(name, required_labels):
+        return {
+            "albumId": f"local-{uuid.uuid4().hex}",
+            "name": name,
+            "requiredLabels": required_labels,
+            "source": "local",
+        }
+
+    @staticmethod
+    def _normalize_local_albums(items):
+        normalized = []
+        if not isinstance(items, list):
+            return normalized
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            album_id = str(item.get("albumId") or "").strip()
+            name = str(item.get("name") or "").strip()
+            required = MillerPicDesktopApp._dedupe_subjects(item.get("requiredLabels") or [])
+            if not album_id or not name or not required:
+                continue
+            normalized.append(
+                {
+                    "albumId": album_id,
+                    "name": name,
+                    "requiredLabels": required,
+                    "source": "local",
+                }
+            )
+        return normalized
+
+    def _replace_local_album(self, album):
+        album_id = album.get("albumId")
+        self.local_albums = [item for item in self.local_albums if item.get("albumId") != album_id]
+        self.local_albums.append(album)
+
+    def _fetch_all_photos(self, headers, limit=100, max_pages=20):
+        all_photos = []
+        next_token = ""
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos"
+
+        for _ in range(max_pages):
+            params = {"limit": str(limit)}
+            if next_token:
+                params["nextToken"] = next_token
+
+            response = requests.get(endpoint, headers=headers, params=params, timeout=30)
+            body = self._safe_json(response)
+            if response.status_code != 200:
+                return None, response.status_code, body
+
+            page_items = body.get("photos") or []
+            all_photos.extend(page_items)
+            next_token = body.get("nextToken") or ""
+            if not next_token:
+                break
+
+        return all_photos, 200, {"count": len(all_photos)}
+    
+    def _handle_album_api_error(self, operation_name, status_code, response_body):
+        error_text = self._extract_error_message(response_body, f"request failed ({status_code})")
+        detail = f"{operation_name} failed: {error_text}"
+        
+        if status_code == 404:
+            detail = (
+                f"{operation_name} failed: albums API route was not found (HTTP 404).\n\n"
+                "Deploy the latest backend/API Gateway changes for album endpoints, then try again."
+            )
+        elif status_code == 401:
+            detail = (
+                f"{operation_name} failed: unauthorized (HTTP 401).\n\n"
+                "Sign in again to refresh your token, then retry."
+            )
+        
+        self.log(f"Album API error ({operation_name}): HTTP {status_code} -> {error_text}")
+        self.root.after(0, messagebox.showerror, "Album action failed", detail)
+
+    def _get_selected_album(self):
+        selected = self.albums_tree.selection()
+        if not selected:
+            return None
+
+        album_id = selected[0]
+        return self.albums_by_id.get(album_id)
+
+    def _select_album_by_id(self, album_id):
+        if not album_id:
+            return
+        if album_id not in self.albums_by_id:
+            return
+        self.albums_tree.selection_set(album_id)
+        self.albums_tree.focus(album_id)
+
+    def _refresh_albums_table(self, albums):
+        selected_album_id = None
+        selected = self.albums_tree.selection()
+        if selected:
+            selected_album_id = selected[0]
+
+        self.albums_by_id = {}
+        for row_id in self.albums_tree.get_children():
+            self.albums_tree.delete(row_id)
+
+        for album in albums:
+            album_id = album.get("albumId") or ""
+            required_labels = album.get("requiredLabels") or []
+            if not album_id:
+                continue
+
+            self.albums_by_id[album_id] = album
+            self.albums_tree.insert(
+                "",
+                "end",
+                iid=album_id,
+                values=(
+                    album.get("name") or "",
+                    ", ".join(required_labels),
+                    album_id,
+                ),
+            )
+
+        if selected_album_id and selected_album_id in self.albums_by_id:
+            self.albums_tree.selection_set(selected_album_id)
+
+        self._set_album_status(f"Albums loaded: {len(self.albums_by_id)}")
+
+    def on_refresh_albums(self):
+        headers = self._headers()
+        if not headers:
+            return
+
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/albums"
+        self._run_in_thread(self._albums_list_flow, endpoint, headers)
+
+    def _albums_list_flow(self, endpoint, headers):
+        try:
+            self.log("Requesting albums list...")
+            response = requests.get(endpoint, headers=headers, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"GET /albums -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code != 200:
+                if self._is_not_found_status(response.status_code):
+                    self.albums_backend_available = False
+                    self.root.after(0, self._refresh_albums_table, list(self.local_albums))
+                    self.root.after(0, self._set_album_status, f"Albums loaded (local mode): {len(self.local_albums)}")
+                    return
+                self._handle_album_api_error("Refresh albums", response.status_code, body)
+                return
+
+            albums = body.get("albums") or []
+            self.albums_backend_available = True
+            self.root.after(0, self._refresh_albums_table, albums)
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
+    def on_create_album(self):
+        headers = self._headers()
+        if not headers:
+            return
+
+        name = self.album_name_var.get().strip()
+        if not name:
+            messagebox.showerror("Missing album name", "Enter an album name.")
+            return
+
+        required_labels = self._dedupe_subjects(self._parse_subjects_csv(self.album_required_labels_var.get()))
+        if not required_labels:
+            messagebox.showerror("Missing labels", "Enter at least one required label for the album.")
+            return
+
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/albums"
+        payload = {
+            "name": name,
+            "requiredLabels": required_labels,
+        }
+        self._set_album_status("Creating album...")
+        self._run_in_thread(self._albums_create_flow, endpoint, headers, payload)
+
+    def on_delete_selected_album(self):
+        album = self._get_selected_album()
+        if not album:
+            messagebox.showerror("No album selected", "Select an album first.")
+            return
+
+        album_name = album.get("name") or album.get("albumId")
+        confirmed = messagebox.askyesno("Delete album", f"Delete album '{album_name}'?")
+        if not confirmed:
+            return
+
+        album_id = album.get("albumId")
+        if not album_id:
+            return
+
+        if self.albums_backend_available is False or album.get("source") == "local":
+            self.local_albums = [item for item in self.local_albums if item.get("albumId") != album_id]
+            self._save_local_state()
+            self._refresh_albums_table(list(self.local_albums))
+            if (self.current_album_context or {}).get("albumId") == album_id:
+                self.on_show_all_photos()
+            self._set_album_status(f"Album deleted (local mode): {album_name}")
+            return
+
+        headers = self._headers()
+        if not headers:
+            return
+
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/albums/{album_id}"
+        self._run_in_thread(self._albums_delete_flow, endpoint, headers, album_id, album_name)
+
+    def _albums_delete_flow(self, endpoint, headers, album_id, album_name):
+        try:
+            response = requests.delete(endpoint, headers=headers, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"DELETE /albums/{{albumId}} -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code not in {200, 204}:
+                self._handle_album_api_error("Delete album", response.status_code, body)
+                return
+
+            self.root.after(0, self._set_album_status, f"Album deleted: {album_name}")
+            self.root.after(0, self.on_refresh_albums)
+            if (self.current_album_context or {}).get("albumId") == album_id:
+                self.root.after(0, self.on_show_all_photos)
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
+    def _albums_create_flow(self, endpoint, headers, payload):
+        try:
+            self.log(f"Creating album '{payload.get('name')}'...")
+            response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"POST /albums -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code != 200:
+                if self._is_not_found_status(response.status_code):
+                    self.albums_backend_available = False
+                    local_album = self._build_local_album(
+                        payload.get("name") or "Album",
+                        payload.get("requiredLabels") or [],
+                    )
+                    self._replace_local_album(local_album)
+                    self._save_local_state()
+                    self.root.after(0, self._refresh_albums_table, list(self.local_albums))
+                    self.root.after(0, self._select_album_by_id, local_album.get("albumId"))
+                    self.root.after(0, self._set_album_status, f"Album created (local mode): {local_album.get('name')}")
+                    return
+                self._handle_album_api_error("Create album", response.status_code, body)
+                return
+
+            self.albums_backend_available = True
+            self.root.after(0, self._set_album_status, f"Album created: {body.get('name') or payload.get('name')}")
+            self.root.after(0, self.on_refresh_albums)
+            self.root.after(0, self._select_album_by_id, body.get("albumId"))
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
+    def on_view_selected_album_photos(self):
+        album = self._get_selected_album()
+        if not album:
+            messagebox.showerror("No album selected", "Select an album first.")
+            return
+
+        self._set_album_status(
+            f"Selected album: {album.get('name') or album.get('albumId')} · Labels: {', '.join(album.get('requiredLabels') or [])}"
+        )
+
+        headers = self._headers()
+        if not headers:
+            return
+
+        album_id = album.get("albumId")
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/albums/{album_id}/photos"
+        self._run_in_thread(self._album_photos_flow, endpoint, headers, album)
+
+    def _album_photos_flow(self, endpoint, headers, album):
+        try:
+            album_id = album.get("albumId")
+            self.log(f"Requesting derived photos for albumId={album_id}...")
+            response = requests.get(endpoint, headers=headers, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"GET /albums/{{albumId}}/photos -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code != 200:
+                if self._is_not_found_status(response.status_code):
+                    self.albums_backend_available = False
+                    all_photos, list_status, list_body = self._fetch_all_photos(headers)
+                    if list_status != 200:
+                        self._handle_album_api_error("View album photos", list_status, list_body)
+                        return
+
+                    required_labels = self._normalize_label_set(album.get("requiredLabels") or [])
+                    filtered = []
+                    for photo in all_photos or []:
+                        subjects = self._normalize_label_set(photo.get("subjects") or [])
+                        if required_labels.issubset(subjects):
+                            filtered.append(photo)
+
+                    self.current_album_context = {
+                        "albumId": album.get("albumId"),
+                        "name": album.get("name"),
+                        "requiredLabels": album.get("requiredLabels") or [],
+                    }
+                    self.root.after(
+                        0,
+                        self._set_album_status,
+                        f"Viewing album (local mode): {album.get('name') or album_id} · Photos: {len(filtered)}",
+                    )
+                    self.root.after(0, self._refresh_photos_table, filtered, headers)
+                    return
+                self._handle_album_api_error("View album photos", response.status_code, body)
+                return
+
+            photos = body.get("photos") or []
+            self.albums_backend_available = True
+            self.current_album_context = {
+                "albumId": album.get("albumId"),
+                "name": album.get("name"),
+                "requiredLabels": body.get("requiredLabels") or album.get("requiredLabels") or [],
+            }
+            self.root.after(0, self._set_album_status, f"Viewing album: {album.get('name') or album_id} · Photos: {len(photos)}")
+            self.root.after(0, self._refresh_photos_table, photos, headers)
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
+    def on_show_all_photos(self):
+        self.current_album_context = None
+        if self.albums_backend_available is False:
+            self._set_album_status("Albums loaded (local mode). Showing full photo list.")
+        else:
+            self._set_album_status("Albums loaded. Showing full photo list.")
+        self.on_list_first_page()
+
+    def on_add_selected_photo_to_album(self):
+        selected_photo = self._get_selected_photo()
+        if not selected_photo:
+            messagebox.showerror("No photo selected", "Select a photo row first.")
+            return
+
+        album = self._get_selected_album()
+        if not album:
+            messagebox.showerror("No album selected", "Select an album first.")
+            return
+
+        self._start_add_photo_to_album(selected_photo, album)
+
+    def on_add_selected_photo_to_album_menu(self):
+        selected_photo = self._get_selected_photo()
+        if not selected_photo:
+            messagebox.showerror("No photo selected", "Select a photo row first.")
+            return
+
+        album = self._prompt_select_album(title_text="Add Photo to Album")
+        if not album:
+            return
+
+        self._start_add_photo_to_album(selected_photo, album)
+
+    def _start_add_photo_to_album(self, selected_photo, album):
+        headers = self._headers()
+        if not headers:
+            return
+
+        photo_id = selected_photo.get("photoId")
+        album_id = album.get("albumId")
+        if not photo_id or not album_id:
+            messagebox.showerror("Missing IDs", "Photo or album ID is missing.")
+            return
+
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/albums/{album_id}/photos/{photo_id}/apply-labels"
+        self._run_in_thread(
+            self._album_apply_labels_flow,
+            endpoint,
+            headers,
+            album,
+            photo_id,
+            selected_photo.get("subjects") or [],
+        )
+
+    def _album_apply_labels_flow(self, endpoint, headers, album, photo_id, current_subjects):
+        try:
+            response = requests.post(endpoint, headers=headers, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"POST /albums/{{albumId}}/photos/{{photoId}}/apply-labels -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code != 200:
+                if self._is_not_found_status(response.status_code):
+                    self.albums_backend_available = False
+                    subjects = self._dedupe_subjects(current_subjects)
+                    existing = self._normalize_label_set(subjects)
+                    for label in album.get("requiredLabels") or []:
+                        lowered = str(label or "").strip().lower()
+                        if lowered and lowered not in existing:
+                            subjects.append(label)
+                            existing.add(lowered)
+
+                    patch_endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos/{photo_id}"
+                    patch_payload = {"subjects": subjects}
+                    patch_response = requests.patch(patch_endpoint, headers=headers, json=patch_payload, timeout=30)
+                    patch_body = self._safe_json(patch_response)
+                    self.log(f"PATCH /photos/{{photoId}} (local album add) -> {patch_response.status_code}")
+                    self.log(pretty_json(patch_body))
+                    if patch_response.status_code != 200:
+                        self._handle_album_api_error("Add photo to album", patch_response.status_code, patch_body)
+                        return
+
+                    self.root.after(0, self._apply_labels_update_locally, photo_id, subjects)
+                    self.root.after(
+                        0,
+                        self._set_album_status,
+                        f"Added selected photo to album (local mode): {album.get('name') or album.get('albumId')}",
+                    )
+                    return
+                self._handle_album_api_error("Add photo to album", response.status_code, body)
+                return
+
+            self.albums_backend_available = True
+            next_subjects = body.get("subjects") or []
+            self.root.after(0, self._apply_labels_update_locally, photo_id, next_subjects)
+            self.root.after(0, self._set_album_status, f"Added selected photo to album: {album.get('name') or album.get('albumId')}")
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
+    @staticmethod
+    def _normalize_label_set(labels):
+        normalized = set()
+        for label in labels or []:
+            lowered = str(label or "").strip().lower()
+            if lowered:
+                normalized.add(lowered)
+        return normalized
+
+    def _prompt_album_labels_to_remove(self, candidate_labels):
+        selected_labels = self._prompt_checklist_labels(
+            title_text="Remove Labels from Current Album",
+            labels=candidate_labels,
+            checked_labels=candidate_labels,
+        )
+        if selected_labels is None:
+            return None
+
+        selected_set = self._normalize_label_set(selected_labels)
+        removable_set = self._normalize_label_set(candidate_labels)
+        remove_labels = [label for label in candidate_labels if label.lower() in (removable_set - selected_set)]
+        return self._dedupe_subjects(remove_labels)
+
+    def on_manage_selected_photo_labels(self):
+        selected_photo = self._get_selected_photo()
+        if not selected_photo:
+            messagebox.showerror("No photo selected", "Select a photo row first.")
+            return
+
+        next_labels = self._prompt_manage_labels(selected_photo.get("subjects") or [])
+        if next_labels is None:
+            return
+
+        headers = self._headers()
+        if not headers:
+            return
+
+        photo_id = selected_photo.get("photoId")
+        if not photo_id:
+            messagebox.showerror("Missing photo ID", "Selected row is missing photoId.")
+            return
+
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos/{photo_id}"
+        payload = {"subjects": self._dedupe_subjects(next_labels)}
+        self._run_in_thread(self._save_labels_flow, endpoint, headers, payload, photo_id)
+
+    def on_remove_selected_photo_album_labels(self):
+        selected_photo = self._get_selected_photo()
+        if not selected_photo:
+            messagebox.showerror("No photo selected", "Select a photo row first.")
+            return
+
+        album = self._get_selected_album()
+        if not album:
+            messagebox.showerror("No album selected", "Select an album first.")
+            return
+
+        photo_subjects = selected_photo.get("subjects") or []
+        album_required_labels = album.get("requiredLabels") or []
+        photo_subjects_set = self._normalize_label_set(photo_subjects)
+
+        removable = [
+            label for label in album_required_labels
+            if str(label or "").strip().lower() in photo_subjects_set
+        ]
+        removable = self._dedupe_subjects(removable)
+        if not removable:
+            messagebox.showinfo(
+                "Nothing to remove",
+                "The selected photo has none of the selected album's required labels.",
+            )
+            return
+
+        requested_labels = self._prompt_album_labels_to_remove(removable)
+        if requested_labels is None:
+            return
+        if not requested_labels:
+            self.log("Remove labels cancelled: no labels selected.")
+            return
+
+        headers = self._headers()
+        if not headers:
+            return
+
+        photo_id = selected_photo.get("photoId")
+        album_id = album.get("albumId")
+        if not photo_id or not album_id:
+            messagebox.showerror("Missing IDs", "Photo or album ID is missing.")
+            return
+
+        endpoint = f"{self.api_base_url_var.get().rstrip('/')}/albums/{album_id}/photos/{photo_id}/remove-labels"
+        payload = {"labels": requested_labels}
+        self._run_in_thread(
+            self._album_remove_labels_flow,
+            endpoint,
+            headers,
+            album,
+            photo_id,
+            payload,
+            selected_photo.get("subjects") or [],
+        )
+
+    def _album_remove_labels_flow(self, endpoint, headers, album, photo_id, payload, current_subjects):
+        try:
+            response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+            body = self._safe_json(response)
+            self.log(f"POST /albums/{{albumId}}/photos/{{photoId}}/remove-labels -> {response.status_code}")
+            self.log(pretty_json(body))
+
+            if response.status_code != 200:
+                if self._is_not_found_status(response.status_code):
+                    self.albums_backend_available = False
+                    remove_set = self._normalize_label_set(payload.get("labels") or [])
+                    next_subjects = []
+                    for subject in current_subjects:
+                        lowered = str(subject or "").strip().lower()
+                        if lowered and lowered in remove_set:
+                            continue
+                        if str(subject or "").strip():
+                            next_subjects.append(subject)
+
+                    patch_endpoint = f"{self.api_base_url_var.get().rstrip('/')}/photos/{photo_id}"
+                    patch_payload = {"subjects": next_subjects}
+                    patch_response = requests.patch(patch_endpoint, headers=headers, json=patch_payload, timeout=30)
+                    patch_body = self._safe_json(patch_response)
+                    self.log(f"PATCH /photos/{{photoId}} (local album remove) -> {patch_response.status_code}")
+                    self.log(pretty_json(patch_body))
+                    if patch_response.status_code != 200:
+                        self._handle_album_api_error("Remove photo album labels", patch_response.status_code, patch_body)
+                        return
+
+                    self.root.after(0, self._apply_labels_update_locally, photo_id, next_subjects)
+                    self.root.after(
+                        0,
+                        self._set_album_status,
+                        f"Removed selected labels from photo (local mode): {album.get('name') or album.get('albumId')}",
+                    )
+                    current_album = self.current_album_context or {}
+                    if current_album.get("albumId") == album.get("albumId"):
+                        self.root.after(0, self.on_view_selected_album_photos)
+                    return
+                self._handle_album_api_error("Remove photo album labels", response.status_code, body)
+                return
+
+            self.albums_backend_available = True
+            next_subjects = body.get("subjects") or []
+            self.root.after(0, self._apply_labels_update_locally, photo_id, next_subjects)
+            self.root.after(0, self._set_album_status, f"Removed selected labels from photo for album: {album.get('name') or album.get('albumId')}")
+
+            current_album = self.current_album_context or {}
+            if current_album.get("albumId") == album.get("albumId"):
+                self.root.after(0, self.on_view_selected_album_photos)
+        except requests.RequestException as error:
+            self.log(f"Network error: {error}")
+        except Exception as error:
+            self.log(f"Unexpected error: {error}")
+
+    def on_photos_tree_right_click(self, event):
+        row_id = self.photos_tree.identify_row(event.y)
+        if not row_id:
+            return
+
+        self.photos_tree.selection_set(row_id)
+
+        context_menu = tk.Menu(self.root, tearoff=0)
+        context_menu.add_command(label="Manage Labels...", command=self.on_manage_selected_photo_labels)
+        context_menu.add_command(label="Add to Album...", command=self.on_add_selected_photo_to_album_menu)
+
+        if self.current_album_context is not None:
+            context_menu.add_separator()
+            context_menu.add_command(
+                label="Remove from Current Album...",
+                command=self.on_remove_selected_photo_album_labels,
+            )
+
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
 
     def _on_frame_configure(self, _event=None):
         self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
@@ -833,11 +1636,13 @@ class MillerPicDesktopApp:
 
         self.managed_folders = sorted(set(managed))
         self.synced_files = synced_files
+        self.local_albums = self._normalize_local_albums(data.get("localAlbums") or [])
 
     def _save_local_state(self):
         payload = {
             "managedFolders": self.managed_folders,
             "syncedFiles": self.synced_files,
+            "localAlbums": self.local_albums,
         }
         state_path = self._desktop_state_file_path()
         try:
@@ -1660,6 +2465,7 @@ class MillerPicDesktopApp:
             self.log(pretty_json(body))
 
             if response.status_code != 200:
+                self._handle_album_api_error("Remove photo album labels", response.status_code, body)
                 return
 
             download_url = body.get("downloadUrl")

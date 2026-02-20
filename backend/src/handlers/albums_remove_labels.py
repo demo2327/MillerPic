@@ -3,7 +3,10 @@ import os
 
 import boto3
 
-from handlers.albums_common import extract_user_id, normalize_label, normalize_photo_subjects, utc_now_iso
+try:
+    from handlers.albums_common import extract_user_id, normalize_label, normalize_photo_subjects, utc_now_iso
+except ImportError:
+    from albums_common import extract_user_id, normalize_label, normalize_photo_subjects, utc_now_iso  # type: ignore
 
 
 dynamodb = boto3.resource("dynamodb")

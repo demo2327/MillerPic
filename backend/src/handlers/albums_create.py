@@ -4,13 +4,22 @@ import uuid
 
 import boto3
 
-from handlers.albums_common import (
-    MAX_ALBUM_NAME_LENGTH,
-    album_response,
-    extract_user_id,
-    normalize_required_labels,
-    utc_now_iso,
-)
+try:
+    from handlers.albums_common import (
+        MAX_ALBUM_NAME_LENGTH,
+        album_response,
+        extract_user_id,
+        normalize_required_labels,
+        utc_now_iso,
+    )
+except ImportError:
+    from albums_common import (  # type: ignore
+        MAX_ALBUM_NAME_LENGTH,
+        album_response,
+        extract_user_id,
+        normalize_required_labels,
+        utc_now_iso,
+    )
 
 
 dynamodb = boto3.resource("dynamodb")

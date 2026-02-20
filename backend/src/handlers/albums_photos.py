@@ -5,7 +5,10 @@ from datetime import datetime
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
-from handlers.albums_common import extract_user_id
+try:
+    from handlers.albums_common import extract_user_id
+except ImportError:
+    from albums_common import extract_user_id  # type: ignore
 
 
 dynamodb = boto3.resource("dynamodb")

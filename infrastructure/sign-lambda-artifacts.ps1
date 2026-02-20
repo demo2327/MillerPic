@@ -35,7 +35,12 @@ $functions = @(
     "hard_delete",
     "patch_photo",
     "search",
-    "get_photo"
+    "get_photo",
+    "albums_create",
+    "albums_list",
+    "albums_photos",
+    "albums_apply_labels",
+    "albums_remove_labels"
 )
 
 $timestamp = Get-Date -Format "yyyyMMddHHmmss"
@@ -56,6 +61,14 @@ try {
         New-Item -ItemType Directory -Path $stagingDir | Out-Null
 
         Copy-Item -Path $sourceFile -Destination (Join-Path $stagingDir "$fn.py") -Force
+
+        if ($fn -like "albums_*") {
+            $sharedModule = Join-Path $handlersFullPath "albums_common.py"
+            if (-not (Test-Path $sharedModule)) {
+                throw "Missing shared module for album handlers: $sharedModule"
+            }
+            Copy-Item -Path $sharedModule -Destination (Join-Path $stagingDir "albums_common.py") -Force
+        }
 
         $zipPath = Join-Path $tempDir "$fn.zip"
         if (Test-Path $zipPath) {

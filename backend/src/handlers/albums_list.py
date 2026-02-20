@@ -4,7 +4,10 @@ import os
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from handlers.albums_common import album_response, extract_user_id
+try:
+    from handlers.albums_common import album_response, extract_user_id
+except ImportError:
+    from albums_common import album_response, extract_user_id  # type: ignore
 
 
 dynamodb = boto3.resource("dynamodb")
