@@ -1,13 +1,15 @@
 import json
 import os
 from io import BytesIO
+from datetime import datetime
 
 import boto3
 from botocore.exceptions import ClientError
 
 try:
-    from PIL import Image
+    from PIL import ExifTags, Image
 except Exception:
+    ExifTags = None
     Image = None
 
 s3 = boto3.client("s3")
@@ -16,6 +18,7 @@ dynamodb = boto3.resource("dynamodb")
 PHOTO_BUCKET = os.environ["PHOTO_BUCKET"]
 PHOTOS_TABLE = os.environ["PHOTOS_TABLE"]
 THUMBNAIL_MAX_SIZE = int(os.environ.get("THUMBNAIL_MAX_SIZE", "320"))
+MAX_SUBJECTS = 50
 
 
 def _build_thumbnail_key(user_id, photo_id):
@@ -32,6 +35,83 @@ def _create_thumbnail_bytes(source_bytes):
         output = BytesIO()
         normalized.save(output, format="WEBP", quality=80)
         return output.getvalue()
+
+
+def _build_exif_tag_map(image):
+    if ExifTags is None:
+        return {}
+
+    exif_data = image.getexif()
+    if not exif_data:
+        return {}
+
+    return {
+        ExifTags.TAGS.get(tag_id, tag_id): value
+        for tag_id, value in exif_data.items()
+    }
+
+
+def _normalize_date_label(raw_value):
+    if not raw_value:
+        return None
+
+    if isinstance(raw_value, bytes):
+        raw_value = raw_value.decode("utf-8", errors="ignore")
+
+    value = str(raw_value).strip()
+    if not value:
+        return None
+
+    candidates = [
+        "%Y:%m:%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y:%m:%d",
+        "%Y-%m-%d",
+    ]
+    for date_format in candidates:
+        try:
+            parsed = datetime.strptime(value, date_format)
+            return f"date:{parsed.date().isoformat()}"
+        except ValueError:
+            continue
+
+    return None
+
+
+def _extract_date_label_from_image(source_bytes):
+    if Image is None:
+        return None
+
+    with Image.open(BytesIO(source_bytes)) as image:
+        tag_map = _build_exif_tag_map(image)
+        return _normalize_date_label(tag_map.get("DateTimeOriginal") or tag_map.get("DateTime"))
+
+
+def _merge_subjects_with_date_label(subjects, date_label):
+    cleaned = []
+    seen = set()
+
+    for value in subjects or []:
+        if not isinstance(value, str):
+            continue
+        item = value.strip()
+        if not item:
+            continue
+        lowered = item.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        cleaned.append(item)
+
+    if date_label:
+        lowered = date_label.lower()
+        if lowered not in seen:
+            cleaned.append(date_label)
+
+    if len(cleaned) > MAX_SUBJECTS:
+        cleaned = cleaned[:MAX_SUBJECTS]
+
+    return cleaned
 
 
 def _try_generate_thumbnail(user_id, photo_id, object_key, content_type):
@@ -54,6 +134,11 @@ def _try_generate_thumbnail(user_id, photo_id, object_key, content_type):
         CacheControl="public, max-age=31536000",
     )
     return thumbnail_key
+
+
+def _load_source_bytes(object_key):
+    source_object = s3.get_object(Bucket=PHOTO_BUCKET, Key=object_key)
+    return source_object.get("Body").read()
 
 def handler(event, context):
     try:
@@ -120,23 +205,38 @@ def handler(event, context):
                 }
             raise
         
+        source_bytes = None
+        date_label = None
+        content_type = item.get("ContentType")
+        content_type_normalized = (content_type or "").lower()
+        if content_type_normalized.startswith("image/"):
+            try:
+                source_bytes = _load_source_bytes(object_key)
+                date_label = _extract_date_label_from_image(source_bytes)
+            except Exception as metadata_error:
+                print(f"upload-complete metadata extraction skipped: {metadata_error}")
+
         thumbnail_key = None
         try:
             thumbnail_key = _try_generate_thumbnail(
                 user_id=user_id,
                 photo_id=photo_id,
                 object_key=object_key,
-                content_type=item.get("ContentType"),
+                content_type=content_type,
             )
         except Exception as thumbnail_error:
             print(f"upload-complete thumbnail generation skipped: {thumbnail_error}")
 
-        update_expression = "SET #status = :active"
+        merged_subjects = _merge_subjects_with_date_label(item.get("Subjects") or [], date_label)
+
+        update_expression = "SET #status = :active, #subjects = :subjects"
         expression_attribute_names = {
             "#status": "Status",
+            "#subjects": "Subjects",
         }
         expression_attribute_values = {
             ":active": "ACTIVE",
+            ":subjects": merged_subjects,
         }
 
         if thumbnail_key:
