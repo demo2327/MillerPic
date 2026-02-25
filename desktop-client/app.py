@@ -1,5 +1,6 @@
 import json
 import hashlib
+import math
 import mimetypes
 import os
 import re
@@ -89,6 +90,9 @@ class MillerPicDesktopApp:
         self.list_status_var = tk.StringVar(value="Page 1 · No results yet")
         self.search_query_var = tk.StringVar()
         self.search_limit_var = tk.StringVar(value="20")
+        self.sync_status_var = tk.StringVar(value="Sync status: idle")
+        self.sync_queue_summary_var = tk.StringVar(value="Queue: queued=0, uploading=0, failed=0")
+        self.sync_eta_var = tk.StringVar(value="ETA: n/a")
         self.album_name_var = tk.StringVar()
         self.album_required_labels_var = tk.StringVar()
         self.album_status_var = tk.StringVar(value="Albums: none loaded")
@@ -114,10 +118,17 @@ class MillerPicDesktopApp:
         self.upload_queue_lock = threading.Lock()
         self.managed_folders = []
         self.synced_files = {}
+        self.folder_sync_state = {}
+        self.upload_duration_history_seconds = []
         self.albums_by_id = {}
         self.local_albums = []
         self.albums_backend_available = None
         self.current_album_context = None
+        self.curation_folder_var = tk.StringVar()
+        self.curation_status_var = tk.StringVar(value="Curation: select a local folder to begin")
+        self.curation_bulk_labels_var = tk.StringVar()
+        self.curation_items = []
+        self.curation_items_by_path = {}
         self._queue_refresh_scheduled = False
         self.google_credentials = None
 
@@ -147,7 +158,20 @@ class MillerPicDesktopApp:
         self.main_canvas.bind("<Enter>", self._bind_mousewheel)
         self.main_canvas.bind("<Leave>", self._unbind_mousewheel)
 
-        auth_frame = ttk.LabelFrame(container, text="Connection + Auth", padding=10)
+        self.main_tabs = ttk.Notebook(container)
+        self.main_tabs.pack(fill=BOTH, expand=True)
+
+        self.sync_tab = ttk.Frame(self.main_tabs, padding=8)
+        self.library_tab = ttk.Frame(self.main_tabs, padding=8)
+        self.curation_tab = ttk.Frame(self.main_tabs, padding=8)
+        self.settings_tab = ttk.Frame(self.main_tabs, padding=8)
+
+        self.main_tabs.add(self.sync_tab, text="Sync")
+        self.main_tabs.add(self.library_tab, text="Library")
+        self.main_tabs.add(self.curation_tab, text="Curation")
+        self.main_tabs.add(self.settings_tab, text="Settings")
+
+        auth_frame = ttk.LabelFrame(self.settings_tab, text="Connection + Auth", padding=10)
         auth_frame.pack(fill=X)
 
         ttk.Label(auth_frame, text="API Base URL").grid(row=0, column=0, sticky="w")
@@ -166,7 +190,13 @@ class MillerPicDesktopApp:
         ttk.Button(auth_actions, text="Sign out", command=self.on_google_sign_out).pack(side=LEFT, padx=(8, 0))
         ttk.Label(auth_actions, textvariable=self.auth_status_var).pack(side=LEFT, padx=(12, 0))
 
-        upload_frame = ttk.LabelFrame(container, text="Upload Photo", padding=10)
+        sync_summary_frame = ttk.LabelFrame(self.sync_tab, text="Sync Overview", padding=10)
+        sync_summary_frame.pack(fill=X)
+        ttk.Label(sync_summary_frame, textvariable=self.sync_status_var).pack(anchor="w")
+        ttk.Label(sync_summary_frame, textvariable=self.sync_queue_summary_var).pack(anchor="w", pady=(4, 0))
+        ttk.Label(sync_summary_frame, textvariable=self.sync_eta_var).pack(anchor="w", pady=(4, 0))
+
+        upload_frame = ttk.LabelFrame(self.sync_tab, text="Sync + Upload", padding=10)
         upload_frame.pack(fill=X, pady=(12, 0))
 
         file_row = ttk.Frame(upload_frame)
@@ -198,12 +228,18 @@ class MillerPicDesktopApp:
 
         self.managed_folders_tree = ttk.Treeview(
             upload_frame,
-            columns=("path",),
+            columns=("path", "state", "lastSync", "error"),
             show="headings",
             height=3,
         )
-        self.managed_folders_tree.heading("path", text="Managed Folders")
-        self.managed_folders_tree.column("path", width=820)
+        self.managed_folders_tree.heading("path", text="Managed Folder")
+        self.managed_folders_tree.heading("state", text="State")
+        self.managed_folders_tree.heading("lastSync", text="Last Sync")
+        self.managed_folders_tree.heading("error", text="Error")
+        self.managed_folders_tree.column("path", width=420)
+        self.managed_folders_tree.column("state", width=90)
+        self.managed_folders_tree.column("lastSync", width=170)
+        self.managed_folders_tree.column("error", width=180)
         self.managed_folders_tree.pack(fill=X, pady=(8, 0))
         self._refresh_managed_folders_tree()
 
@@ -266,7 +302,7 @@ class MillerPicDesktopApp:
         ttk.Button(queue_manage_row, text="Clear Failed", command=self.on_clear_failed_queue_items).pack(side=LEFT, padx=(8, 0))
         ttk.Button(queue_manage_row, text="Clear Skipped", command=self.on_clear_skipped_queue_items).pack(side=LEFT, padx=(8, 0))
 
-        download_frame = ttk.LabelFrame(container, text="Get Download URL", padding=10)
+        download_frame = ttk.LabelFrame(self.library_tab, text="Get Download URL", padding=10)
         download_frame.pack(fill=X, pady=(12, 0))
 
         ttk.Label(download_frame, text="Photo ID").grid(row=0, column=0, sticky="w")
@@ -277,7 +313,7 @@ class MillerPicDesktopApp:
             row=1, column=1, sticky="w"
         )
 
-        search_frame = ttk.LabelFrame(container, text="Search Photos", padding=10)
+        search_frame = ttk.LabelFrame(self.library_tab, text="Search Photos", padding=10)
         search_frame.pack(fill=X, pady=(12, 0))
 
         ttk.Label(search_frame, text="Search Query (filename/subjects)").grid(row=0, column=0, sticky="w")
@@ -294,7 +330,7 @@ class MillerPicDesktopApp:
 
         search_frame.columnconfigure(0, weight=1)
 
-        albums_frame = ttk.LabelFrame(container, text="Albums (Label-defined)", padding=10)
+        albums_frame = ttk.LabelFrame(self.library_tab, text="Albums (Label-defined)", padding=10)
         albums_frame.pack(fill=X, pady=(12, 0))
 
         ttk.Label(albums_frame, text="Album Name").grid(row=0, column=0, sticky="w")
@@ -345,7 +381,7 @@ class MillerPicDesktopApp:
 
         albums_frame.columnconfigure(1, weight=1)
 
-        list_frame = ttk.LabelFrame(container, text="List Photos", padding=10)
+        list_frame = ttk.LabelFrame(self.library_tab, text="Library Photos", padding=10)
         list_frame.pack(fill=X, pady=(12, 0))
 
         ttk.Label(list_frame, text="Limit").grid(row=0, column=0, sticky="w")
@@ -436,7 +472,52 @@ class MillerPicDesktopApp:
         list_frame.columnconfigure(0, weight=1)
         list_frame.columnconfigure(1, weight=1)
 
-        output_frame = ttk.LabelFrame(container, text="Output", padding=10)
+        curation_frame = ttk.LabelFrame(self.curation_tab, text="Local Curation", padding=10)
+        curation_frame.pack(fill=BOTH, expand=True)
+
+        curation_folder_row = ttk.Frame(curation_frame)
+        curation_folder_row.pack(fill=X)
+        ttk.Entry(curation_folder_row, textvariable=self.curation_folder_var).pack(side=LEFT, fill=X, expand=True)
+        ttk.Button(curation_folder_row, text="Browse", command=self.on_curation_select_folder).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(curation_folder_row, text="Scan", command=self.on_curation_scan_folder).pack(side=LEFT, padx=(8, 0))
+
+        curation_actions_row = ttk.Frame(curation_frame)
+        curation_actions_row.pack(fill=X, pady=(8, 0))
+        ttk.Button(curation_actions_row, text="Compare 2 Selected", command=self.on_curation_compare_selected).pack(side=LEFT)
+        ttk.Button(curation_actions_row, text="Rotate Left", command=self.on_curation_rotate_left).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(curation_actions_row, text="Rotate Right", command=self.on_curation_rotate_right).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(curation_actions_row, text="Mark KEEP", command=self.on_curation_mark_keep).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(curation_actions_row, text="Mark REJECT", command=self.on_curation_mark_reject).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(curation_actions_row, text="Queue KEEP for Upload", command=self.on_curation_queue_keep_for_upload).pack(side=LEFT, padx=(8, 0))
+
+        curation_labels_row = ttk.Frame(curation_frame)
+        curation_labels_row.pack(fill=X, pady=(8, 0))
+        ttk.Label(curation_labels_row, text="Bulk labels").pack(side=LEFT)
+        ttk.Entry(curation_labels_row, textvariable=self.curation_bulk_labels_var, width=50).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(curation_labels_row, text="Apply to Selected", command=self.on_curation_apply_bulk_labels).pack(side=LEFT, padx=(8, 0))
+
+        self.curation_tree = ttk.Treeview(
+            curation_frame,
+            columns=("group", "fileName", "decision", "labels", "modifiedAt"),
+            show="headings",
+            height=16,
+            selectmode="extended",
+        )
+        self.curation_tree.heading("group", text="Group")
+        self.curation_tree.heading("fileName", text="File")
+        self.curation_tree.heading("decision", text="Decision")
+        self.curation_tree.heading("labels", text="Labels")
+        self.curation_tree.heading("modifiedAt", text="Modified")
+        self.curation_tree.column("group", width=180)
+        self.curation_tree.column("fileName", width=280)
+        self.curation_tree.column("decision", width=100)
+        self.curation_tree.column("labels", width=260)
+        self.curation_tree.column("modifiedAt", width=170)
+        self.curation_tree.pack(fill=BOTH, expand=True, pady=(8, 0))
+
+        ttk.Label(curation_frame, textvariable=self.curation_status_var).pack(anchor="w", pady=(8, 0))
+
+        output_frame = ttk.LabelFrame(self.settings_tab, text="Output", padding=10)
         output_frame.pack(fill=BOTH, expand=True, pady=(12, 0))
 
         self.output_text = tk.Text(output_frame, wrap="word")
@@ -1455,6 +1536,235 @@ class MillerPicDesktopApp:
         self.selected_folder_var.set(folder_path)
         self.log(f"Selected folder: {folder_path}")
 
+    def on_curation_select_folder(self):
+        folder_path = filedialog.askdirectory(title="Select local curation folder")
+        if not folder_path:
+            return
+        self.curation_folder_var.set(folder_path)
+        self.curation_status_var.set(f"Curation: selected folder {folder_path}")
+
+    def _curation_group_key(self, file_path, modified_epoch):
+        file_name = os.path.basename(file_path)
+        stem = os.path.splitext(file_name)[0]
+        base = re.sub(r"([_\- ]?\d+)$", "", stem).strip().lower() or stem.lower()
+        bucket = int(modified_epoch // 30)
+        return f"{base}:{bucket}"
+
+    def on_curation_scan_folder(self):
+        folder_path = self.curation_folder_var.get().strip()
+        if not folder_path:
+            messagebox.showerror("Missing folder", "Select a curation folder first.")
+            return
+        if not os.path.isdir(folder_path):
+            messagebox.showerror("Invalid folder", "Selected curation folder does not exist.")
+            return
+
+        self.curation_items = []
+        self.curation_items_by_path = {}
+        for row_id in self.curation_tree.get_children():
+            self.curation_tree.delete(row_id)
+
+        count = 0
+        for root_dir, _, files in os.walk(folder_path):
+            for file_name in files:
+                extension = os.path.splitext(file_name)[1].lower()
+                if extension not in SUPPORTED_MEDIA_EXTENSIONS:
+                    continue
+                file_path = os.path.join(root_dir, file_name)
+                try:
+                    modified_epoch = os.path.getmtime(file_path)
+                except OSError:
+                    continue
+
+                item = {
+                    "id": f"curation-{uuid.uuid4().hex}",
+                    "filePath": file_path,
+                    "fileName": file_name,
+                    "decision": "UNSET",
+                    "labels": [],
+                    "group": self._curation_group_key(file_path, modified_epoch),
+                    "modifiedAt": datetime.fromtimestamp(modified_epoch).strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                self.curation_items.append(item)
+                self.curation_items_by_path[self._normalize_path(file_path)] = item
+                self.curation_tree.insert(
+                    "",
+                    "end",
+                    iid=item["id"],
+                    values=(item["group"], item["fileName"], item["decision"], "", item["modifiedAt"]),
+                )
+                count += 1
+
+        self.curation_status_var.set(f"Curation: scanned {count} media files")
+
+    def _get_selected_curation_items(self):
+        selected_ids = self.curation_tree.selection()
+        if not selected_ids:
+            return []
+        selected_set = set(selected_ids)
+        return [item for item in self.curation_items if item.get("id") in selected_set]
+
+    def _refresh_curation_item_row(self, item):
+        item_id = item.get("id")
+        if not item_id:
+            return
+        if item_id not in self.curation_tree.get_children():
+            return
+        self.curation_tree.item(
+            item_id,
+            values=(
+                item.get("group") or "",
+                item.get("fileName") or "",
+                item.get("decision") or "UNSET",
+                ", ".join(item.get("labels") or []),
+                item.get("modifiedAt") or "",
+            ),
+        )
+
+    def on_curation_mark_keep(self):
+        selected_items = self._get_selected_curation_items()
+        if not selected_items:
+            messagebox.showerror("No selection", "Select curation rows first.")
+            return
+        for item in selected_items:
+            item["decision"] = "KEEP"
+            self._refresh_curation_item_row(item)
+        self.curation_status_var.set(f"Curation: marked KEEP on {len(selected_items)} items")
+
+    def on_curation_mark_reject(self):
+        selected_items = self._get_selected_curation_items()
+        if not selected_items:
+            messagebox.showerror("No selection", "Select curation rows first.")
+            return
+        for item in selected_items:
+            item["decision"] = "REJECT"
+            self._refresh_curation_item_row(item)
+        self.curation_status_var.set(f"Curation: marked REJECT on {len(selected_items)} items")
+
+    def on_curation_apply_bulk_labels(self):
+        selected_items = self._get_selected_curation_items()
+        if not selected_items:
+            messagebox.showerror("No selection", "Select curation rows first.")
+            return
+        labels = self._dedupe_subjects(self._parse_subjects_csv(self.curation_bulk_labels_var.get()))
+        if not labels:
+            messagebox.showerror("Missing labels", "Enter one or more bulk labels.")
+            return
+        for item in selected_items:
+            item["labels"] = self._dedupe_subjects((item.get("labels") or []) + labels)
+            self._refresh_curation_item_row(item)
+        self.curation_status_var.set(f"Curation: applied labels to {len(selected_items)} items")
+
+    def _rotate_image_file(self, file_path, angle):
+        if Image is None:
+            raise RuntimeError("Pillow is required for rotate operations")
+        with Image.open(file_path) as image:
+            rotated = image.rotate(angle, expand=True)
+            rotated.save(file_path)
+
+    def _curation_rotate_selected(self, angle):
+        selected_items = self._get_selected_curation_items()
+        if not selected_items:
+            messagebox.showerror("No selection", "Select curation rows first.")
+            return
+
+        rotated = 0
+        skipped = 0
+        for item in selected_items:
+            file_path = item.get("filePath")
+            extension = os.path.splitext(file_path or "")[1].lower()
+            if extension not in SYNC_IMAGE_EXTENSIONS:
+                skipped += 1
+                continue
+            try:
+                self._rotate_image_file(file_path, angle)
+                rotated += 1
+            except Exception as error:
+                skipped += 1
+                self.log(f"Rotate failed for {file_path}: {error}")
+
+        self.curation_status_var.set(f"Curation: rotated {rotated}, skipped {skipped}")
+
+    def on_curation_rotate_left(self):
+        self._curation_rotate_selected(90)
+
+    def on_curation_rotate_right(self):
+        self._curation_rotate_selected(-90)
+
+    def on_curation_compare_selected(self):
+        selected_items = self._get_selected_curation_items()
+        if len(selected_items) != 2:
+            messagebox.showerror("Select 2 items", "Select exactly two curation items to compare.")
+            return
+
+        if Image is None or ImageTk is None:
+            messagebox.showerror("Missing dependency", "Pillow is required for side-by-side compare.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Compare Selected Photos")
+        dialog.geometry("980x520")
+        frame = ttk.Frame(dialog, padding=10)
+        frame.pack(fill=BOTH, expand=True)
+
+        labels = []
+        for index, item in enumerate(selected_items):
+            file_path = item.get("filePath")
+            panel = ttk.Frame(frame)
+            panel.grid(row=0, column=index, padx=8, sticky="n")
+            ttk.Label(panel, text=item.get("fileName") or "").pack()
+            try:
+                with Image.open(file_path) as image:
+                    prepared = image.convert("RGB")
+                    prepared.thumbnail((440, 440))
+                    image_tk = ImageTk.PhotoImage(prepared)
+                image_label = ttk.Label(panel, image=image_tk)
+                image_label.image = image_tk
+                image_label.pack(pady=(6, 0))
+                labels.append(image_label)
+            except Exception as error:
+                ttk.Label(panel, text=f"Preview unavailable: {error}").pack(pady=(6, 0))
+
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+    def on_curation_queue_keep_for_upload(self):
+        selected_items = self._get_selected_curation_items()
+        keep_items = [item for item in selected_items if (item.get("decision") or "").upper() == "KEEP"]
+        if not keep_items:
+            messagebox.showerror("No KEEP items", "Select one or more KEEP items to queue for upload.")
+            return
+
+        queued = 0
+        for item in keep_items:
+            file_path = item.get("filePath")
+            if not file_path or not os.path.isfile(file_path):
+                continue
+            path_key = self._normalize_path(file_path)
+            if self._queue_has_path(path_key):
+                continue
+
+            subjects = self._dedupe_subjects(
+                self._build_subjects_for_file(file_path) + (item.get("labels") or [])
+            )
+            queue_item = {
+                "filePath": file_path,
+                "fileName": item.get("fileName") or os.path.basename(file_path),
+                "photoId": uuid.uuid4().hex,
+                "curation": "KEEP",
+                "status": "QUEUED",
+                "message": "curation-keep",
+                "pathKey": path_key,
+                "signature": self._build_file_signature(file_path),
+                "contentHash": self._compute_content_hash(file_path),
+                "subjects": subjects,
+            }
+            self.upload_queue_items.append(queue_item)
+            self._queue_insert_item(queue_item)
+            queued += 1
+
+        self.curation_status_var.set(f"Curation: queued {queued} KEEP items for upload")
+
     def _desktop_state_file_path(self):
         return os.environ.get("MILLERPIC_DESKTOP_STATE_FILE") or DEFAULT_DESKTOP_STATE_FILE
 
@@ -1634,14 +1944,22 @@ class MillerPicDesktopApp:
         if not isinstance(synced_files, dict):
             synced_files = {}
 
+        folder_sync_state = data.get("folderSyncState")
+        if not isinstance(folder_sync_state, dict):
+            folder_sync_state = {}
+
         self.managed_folders = sorted(set(managed))
         self.synced_files = synced_files
+        self.folder_sync_state = folder_sync_state
+        for folder_path in self.managed_folders:
+            self.folder_sync_state.setdefault(folder_path, {"state": "IDLE", "lastSync": "", "error": ""})
         self.local_albums = self._normalize_local_albums(data.get("localAlbums") or [])
 
     def _save_local_state(self):
         payload = {
             "managedFolders": self.managed_folders,
             "syncedFiles": self.synced_files,
+            "folderSyncState": self.folder_sync_state,
             "localAlbums": self.local_albums,
         }
         state_path = self._desktop_state_file_path()
@@ -1656,7 +1974,78 @@ class MillerPicDesktopApp:
             self.managed_folders_tree.delete(row_id)
 
         for index, folder_path in enumerate(self.managed_folders):
-            self.managed_folders_tree.insert("", "end", iid=f"folder-{index}", values=(folder_path,))
+            state = self.folder_sync_state.get(folder_path) or {}
+            self.managed_folders_tree.insert(
+                "",
+                "end",
+                iid=f"folder-{index}",
+                values=(
+                    folder_path,
+                    state.get("state") or "IDLE",
+                    state.get("lastSync") or "",
+                    state.get("error") or "",
+                ),
+            )
+        self._update_sync_status_summary()
+
+    def _set_folder_sync_state(self, folder_path, state, error=""):
+        if not folder_path:
+            return
+
+        previous = self.folder_sync_state.get(folder_path) or {}
+        payload = {
+            "state": state,
+            "lastSync": previous.get("lastSync"),
+            "error": error or "",
+        }
+
+        if state in {"HEALTHY", "SYNCED", "PAUSED"}:
+            payload["lastSync"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        self.folder_sync_state[folder_path] = payload
+
+    def _update_sync_status_summary(self):
+        queued = 0
+        uploading = 0
+        failed = 0
+        completed = 0
+        for item in self.upload_queue_items:
+            status = (item.get("status") or "").upper()
+            if status == "QUEUED":
+                queued += 1
+            elif status == "UPLOADING":
+                uploading += 1
+            elif status == "FAILED":
+                failed += 1
+            elif status == "COMPLETED":
+                completed += 1
+
+        self.sync_queue_summary_var.set(
+            f"Queue: queued={queued}, uploading={uploading}, failed={failed}, completed={completed}"
+        )
+
+        if self.upload_queue_running:
+            self.sync_status_var.set("Sync status: running")
+        elif failed > 0:
+            self.sync_status_var.set("Sync status: attention needed (failures)")
+        elif queued > 0:
+            self.sync_status_var.set("Sync status: ready to run")
+        else:
+            self.sync_status_var.set("Sync status: idle")
+
+        if uploading <= 0:
+            self.sync_eta_var.set("ETA: n/a")
+            return
+
+        pending = queued + uploading
+        if self.upload_duration_history_seconds:
+            avg_seconds = sum(self.upload_duration_history_seconds) / len(self.upload_duration_history_seconds)
+        else:
+            avg_seconds = 3.0
+
+        eta_seconds = max(0, int(math.ceil((pending * avg_seconds) / max(uploading, 1))))
+        minutes, seconds = divmod(eta_seconds, 60)
+        self.sync_eta_var.set(f"ETA: {minutes}m {seconds}s")
 
     def on_add_managed_folder(self):
         folder_path = self.selected_folder_var.get().strip()
@@ -1675,6 +2064,7 @@ class MillerPicDesktopApp:
 
         self.managed_folders.append(normalized_folder)
         self.managed_folders.sort()
+        self._set_folder_sync_state(normalized_folder, "IDLE")
         self._refresh_managed_folders_tree()
         self._save_local_state()
         self.log(f"Added managed folder: {normalized_folder}")
@@ -1692,6 +2082,7 @@ class MillerPicDesktopApp:
         folder_path = values[0]
 
         self.managed_folders = [folder for folder in self.managed_folders if folder != folder_path]
+        self.folder_sync_state.pop(folder_path, None)
         self._refresh_managed_folders_tree()
         self._save_local_state()
         self.log(f"Removed managed folder: {folder_path}")
@@ -1733,8 +2124,11 @@ class MillerPicDesktopApp:
         for managed_folder in self.managed_folders:
             if not os.path.isdir(managed_folder):
                 missing_folder_count += 1
+                self._set_folder_sync_state(managed_folder, "ERROR", "folder missing")
                 self.log(f"Managed folder not found, skipping: {managed_folder}")
                 continue
+
+            self._set_folder_sync_state(managed_folder, "SYNCING")
 
             for root_dir, _, files in os.walk(managed_folder):
                 for file_name in files:
@@ -1804,12 +2198,15 @@ class MillerPicDesktopApp:
                     self._queue_insert_item(queue_item)
                     added_count += 1
 
+                    self._set_folder_sync_state(managed_folder, "HEALTHY")
+
         self.log(
             "Sync scan complete. "
             f"Queued new files: {added_count}, Already synced: {skipped_known_count}, "
             f"Skipped videos: {skipped_video_count}, Duplicate candidates: {duplicate_candidate_count}, "
             f"Missing folders: {missing_folder_count}"
         )
+        self._refresh_managed_folders_tree()
 
         queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
         if not queued_items:
@@ -1987,10 +2384,12 @@ class MillerPicDesktopApp:
                 iid=item["photoId"],
                 values=(file_name, curation, status, message),
             )
+        self._update_sync_status_summary()
 
     def _queue_update_item(self, photo_id, status, message=""):
         def _apply_update():
             self._schedule_queue_refresh()
+            self._update_sync_status_summary()
 
         self.root.after(0, _apply_update)
 
@@ -2237,6 +2636,7 @@ class MillerPicDesktopApp:
                         item["message"] = ""
 
                     self._queue_update_item(photo_id, "UPLOADING", "")
+                    started_at = datetime.now(timezone.utc)
 
                     guessed_type, _ = mimetypes.guess_type(file_path)
                     content_type = guessed_type or "application/octet-stream"
@@ -2270,6 +2670,10 @@ class MillerPicDesktopApp:
                                     }
                                 status = "COMPLETED"
                                 status_message = message
+                                duration = (datetime.now(timezone.utc) - started_at).total_seconds()
+                                self.upload_duration_history_seconds.append(duration)
+                                if len(self.upload_duration_history_seconds) > 200:
+                                    self.upload_duration_history_seconds = self.upload_duration_history_seconds[-200:]
                             else:
                                 item["status"] = "FAILED"
                                 item["message"] = message
@@ -2302,6 +2706,7 @@ class MillerPicDesktopApp:
             self.root.after(0, self.on_list_photos)
         finally:
             self.upload_queue_running = False
+            self.root.after(0, self._update_sync_status_summary)
 
     def _require_auth(self):
         self._refresh_google_token_if_needed()
