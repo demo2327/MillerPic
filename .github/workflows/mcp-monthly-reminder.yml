@@ -1,0 +1,61 @@
+name: MCP Monthly Reminder
+
+on:
+  schedule:
+    - cron: '0 14 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  remind:
+    name: Create MCP maintenance reminder issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create monthly reminder issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const cycle = new Date().toISOString().slice(0, 7);
+            const titlePrefix = '[Reminder] MCP version review';
+            const title = `${titlePrefix} (${cycle})`;
+
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            for (const issue of openIssues) {
+              if (issue.title.startsWith(titlePrefix)) {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                });
+              }
+            }
+
+            const body = [
+              'Monthly MCP maintenance checklist:',
+              '',
+              '- [ ] Review pinned MCP server versions in `.vscode/mcp.json`',
+              '- [ ] Update `awslabs.aws-documentation-mcp-server` to latest tested version',
+              '- [ ] Run MCP smoke tests from `docs/MCP_SETUP.md`',
+              '- [ ] Update `docs/MCP_SETUP.md` if prompts/workflows changed',
+              '',
+              'Reference: `docs/MCP_SETUP.md`',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body,
+            });
