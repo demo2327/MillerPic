@@ -20,6 +20,23 @@
         "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
       }
     },
+    "aws-documentation": {
+      "disabled": false,
+      "timeout": 60,
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "tool",
+        "run",
+        "--from",
+        "awslabs.aws-documentation-mcp-server@1.1.19",
+        "awslabs.aws-documentation-mcp-server.exe"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "AWS_DOCUMENTATION_PARTITION": "aws"
+      }
+    },
     // Disabled due to invalid upstream tool schema validation:
     // "Failed to validate tool mcp_aws-devops_cost_optimizer: tool parameters array type must have items"
     // Re-enable once the MCP server publishes a fixed schema.
