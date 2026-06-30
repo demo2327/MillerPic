@@ -1592,6 +1592,8 @@ class MillerPicDesktopApp:
         count = 0
         for root_dir, _, files in os.walk(folder_path):
             for file_name in files:
+                if self._is_ignored_sidecar_file(file_name):
+                    continue
                 extension = os.path.splitext(file_name)[1].lower()
                 if extension not in SUPPORTED_MEDIA_EXTENSIONS:
                     continue
@@ -1820,12 +1822,24 @@ class MillerPicDesktopApp:
             return None
 
     @staticmethod
+    def _is_ignored_sidecar_file(file_name):
+        name = os.path.basename(file_name or "")
+        if name.startswith("._"):
+            # macOS AppleDouble resource-fork sidecar (e.g. ._IMG_0008.HEIC)
+            return True
+        return name.lower() in {".ds_store", "thumbs.db", "desktop.ini"}
+
+    @staticmethod
     def _is_sync_image_file(file_name):
+        if MillerPicDesktopApp._is_ignored_sidecar_file(file_name):
+            return False
         extension = os.path.splitext(file_name)[1].lower()
         return extension in SYNC_IMAGE_EXTENSIONS
 
     @staticmethod
     def _is_sync_video_file(file_name):
+        if MillerPicDesktopApp._is_ignored_sidecar_file(file_name):
+            return False
         extension = os.path.splitext(file_name)[1].lower()
         return extension in SYNC_VIDEO_EXTENSIONS
 
@@ -2603,6 +2617,8 @@ class MillerPicDesktopApp:
         queued_count = 0
         for root_dir, _, files in os.walk(folder_path):
             for file_name in files:
+                if self._is_ignored_sidecar_file(file_name):
+                    continue
                 extension = os.path.splitext(file_name)[1].lower()
                 if extension not in SUPPORTED_MEDIA_EXTENSIONS:
                     continue
