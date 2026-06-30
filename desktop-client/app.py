@@ -65,6 +65,15 @@ LIST_THUMBNAIL_WORKERS = 6
 LIST_THUMBNAIL_TIMEOUT_SECONDS = 8
 LIST_THUMBNAIL_URL_TIMEOUT_SECONDS = 6
 
+THEME_ORANGE_BG = "#FFF3E6"
+THEME_ORANGE_PANEL = "#FFE5C6"
+THEME_ORANGE_ACCENT = "#E08A2D"
+THEME_ORANGE_ACCENT_HOVER = "#F2A74B"
+THEME_ORANGE_TEXT = "#3D2A12"
+THEME_ORANGE_TREE_BG = "#FFF9F2"
+THEME_ORANGE_TREE_ALT_BG = "#FFEFD8"
+THEME_ORANGE_TREE_SELECTED = "#FFD39C"
+
 
 def pretty_json(value):
     return json.dumps(value, indent=2, ensure_ascii=False)
@@ -92,7 +101,9 @@ class MillerPicDesktopApp:
         self.search_limit_var = tk.StringVar(value="20")
         self.sync_status_var = tk.StringVar(value="Sync status: idle")
         self.sync_queue_summary_var = tk.StringVar(value="Queue: queued=0, uploading=0, failed=0")
-        self.sync_eta_var = tk.StringVar(value="ETA: n/a")
+        self.sync_eta_var = tk.StringVar(value="Last sync: n/a")
+        self.sync_progress_var = tk.DoubleVar(value=0.0)
+        self.sync_progress_label_var = tk.StringVar(value="Progress: 0%")
         self.album_name_var = tk.StringVar()
         self.album_required_labels_var = tk.StringVar()
         self.album_status_var = tk.StringVar(value="Albums: none loaded")
@@ -115,6 +126,7 @@ class MillerPicDesktopApp:
         self.list_thumbnail_url_cache = {}
         self.upload_queue_items = []
         self.upload_queue_running = False
+        self.sync_scan_running = False
         self.upload_queue_lock = threading.Lock()
         self.managed_folders = []
         self.synced_files = {}
@@ -130,9 +142,18 @@ class MillerPicDesktopApp:
         self.curation_items = []
         self.curation_items_by_path = {}
         self._queue_refresh_scheduled = False
+        self.folder_tree_paths = {}
+        self.folder_tree_loaded = set()
+        self.folder_tree_row_counter = 0
+        self.folder_icon_manila = None
+        self.folder_icon_managed = None
+        self.folder_icon_has_managed_child = None
         self.google_credentials = None
 
         self._load_local_state()
+
+        self._apply_orange_theme()
+        self._init_folder_icons()
 
         self._build_ui()
         self._restore_google_session_if_available()
@@ -143,15 +164,83 @@ class MillerPicDesktopApp:
             ("pbData", ctypes.POINTER(ctypes.c_byte)),
         ]
 
+    def _apply_orange_theme(self):
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        self.root.configure(background=THEME_ORANGE_BG)
+        style.configure(".", background=THEME_ORANGE_BG, foreground=THEME_ORANGE_TEXT)
+        style.configure("TFrame", background=THEME_ORANGE_BG)
+        style.configure("TLabelframe", background=THEME_ORANGE_BG, bordercolor=THEME_ORANGE_ACCENT)
+        style.configure("TLabelframe.Label", background=THEME_ORANGE_BG, foreground=THEME_ORANGE_TEXT)
+        style.configure("TLabel", background=THEME_ORANGE_BG, foreground=THEME_ORANGE_TEXT)
+        style.configure("TNotebook", background=THEME_ORANGE_BG, borderwidth=0)
+        style.configure("TNotebook.Tab", background=THEME_ORANGE_PANEL, foreground=THEME_ORANGE_TEXT, padding=(10, 5))
+        style.map("TNotebook.Tab", background=[("selected", THEME_ORANGE_ACCENT)], foreground=[("selected", "#FFFFFF")])
+        style.configure(
+            "TButton",
+            background=THEME_ORANGE_ACCENT,
+            foreground="#FFFFFF",
+            borderwidth=1,
+            focusthickness=0,
+            padding=(8, 4),
+        )
+        style.map(
+            "TButton",
+            background=[("active", THEME_ORANGE_ACCENT_HOVER), ("pressed", "#CD7A1E")],
+            foreground=[("disabled", "#E8E0D8")],
+        )
+        style.configure(
+            "Treeview",
+            background=THEME_ORANGE_TREE_BG,
+            fieldbackground=THEME_ORANGE_TREE_BG,
+            foreground=THEME_ORANGE_TEXT,
+            bordercolor=THEME_ORANGE_ACCENT,
+        )
+        style.map("Treeview", background=[("selected", THEME_ORANGE_TREE_SELECTED)], foreground=[("selected", THEME_ORANGE_TEXT)])
+        style.configure("Treeview.Heading", background=THEME_ORANGE_PANEL, foreground=THEME_ORANGE_TEXT)
+        style.map("Treeview.Heading", background=[("active", THEME_ORANGE_ACCENT_HOVER)])
+        style.configure("TProgressbar", troughcolor=THEME_ORANGE_PANEL, background=THEME_ORANGE_ACCENT)
+
+    def _build_folder_icon(self, tab_color, body_color, border_color):
+        icon = tk.PhotoImage(width=16, height=14)
+        icon.put(tab_color, to=(2, 1, 9, 5))
+        icon.put(body_color, to=(1, 4, 15, 13))
+        icon.put(border_color, to=(1, 4, 15, 5))
+        icon.put(border_color, to=(1, 12, 15, 13))
+        icon.put(border_color, to=(1, 4, 2, 13))
+        icon.put(border_color, to=(14, 4, 15, 13))
+        return icon
+
+    def _init_folder_icons(self):
+        self.folder_icon_manila = self._build_folder_icon("#F7D79B", "#F2C36B", "#BF8C3C")
+        self.folder_icon_managed = self._build_folder_icon("#9EE09A", "#6EC56A", "#3F8E3D")
+        self.folder_icon_has_managed_child = self._build_folder_icon("#C8EDC2", "#A9DC9E", "#6CA764")
+
     def _build_ui(self):
-        self.main_canvas = tk.Canvas(self.root, highlightthickness=0)
-        self.main_scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.main_canvas.yview)
+        self.main_body = ttk.Frame(self.root)
+        self.main_body.pack(side="top", fill=BOTH, expand=True)
+
+        self.main_canvas = tk.Canvas(self.main_body, highlightthickness=0)
+        self.main_scrollbar = ttk.Scrollbar(self.main_body, orient="vertical", command=self.main_canvas.yview)
         self.main_canvas.configure(yscrollcommand=self.main_scrollbar.set)
 
         self.main_canvas.pack(side=LEFT, fill=BOTH, expand=True)
         self.main_scrollbar.pack(side=RIGHT, fill=Y)
 
+        status_bar = ttk.Frame(self.root, padding=(8, 4))
+        status_bar.pack(side="bottom", fill=X)
+        ttk.Label(status_bar, textvariable=self.sync_status_var).pack(side=LEFT, padx=(0, 12))
+        ttk.Label(status_bar, textvariable=self.sync_queue_summary_var).pack(side=LEFT, padx=(0, 12))
+        ttk.Label(status_bar, textvariable=self.sync_eta_var).pack(side=LEFT, padx=(0, 12))
+        ttk.Progressbar(status_bar, mode="determinate", maximum=100.0, variable=self.sync_progress_var, length=180).pack(side=LEFT, padx=(0, 8))
+        ttk.Label(status_bar, textvariable=self.sync_progress_label_var).pack(side=LEFT)
+
         container = ttk.Frame(self.main_canvas, padding=12)
+        self.main_container = container
         self.main_canvas_window = self.main_canvas.create_window((0, 0), window=container, anchor="nw")
         container.bind("<Configure>", self._on_frame_configure)
         self.main_canvas.bind("<Configure>", self._on_canvas_configure)
@@ -190,117 +279,53 @@ class MillerPicDesktopApp:
         ttk.Button(auth_actions, text="Sign out", command=self.on_google_sign_out).pack(side=LEFT, padx=(8, 0))
         ttk.Label(auth_actions, textvariable=self.auth_status_var).pack(side=LEFT, padx=(12, 0))
 
-        sync_summary_frame = ttk.LabelFrame(self.sync_tab, text="Sync Overview", padding=10)
-        sync_summary_frame.pack(fill=X)
-        ttk.Label(sync_summary_frame, textvariable=self.sync_status_var).pack(anchor="w")
-        ttk.Label(sync_summary_frame, textvariable=self.sync_queue_summary_var).pack(anchor="w", pady=(4, 0))
-        ttk.Label(sync_summary_frame, textvariable=self.sync_eta_var).pack(anchor="w", pady=(4, 0))
+        sync_controls = ttk.Frame(self.sync_tab)
+        sync_controls.pack(fill=X)
+        ttk.Button(sync_controls, text="Sync Managed Folders Now", command=self.on_run_sync_job).pack(side=LEFT)
+        ttk.Button(sync_controls, text="Refresh Explorer", command=self._populate_folder_tree_roots).pack(side=LEFT, padx=(8, 0))
 
-        upload_frame = ttk.LabelFrame(self.sync_tab, text="Sync + Upload", padding=10)
-        upload_frame.pack(fill=X, pady=(12, 0))
-
-        file_row = ttk.Frame(upload_frame)
-        file_row.pack(fill=X)
-        ttk.Entry(file_row, textvariable=self.selected_file_var).pack(side=LEFT, fill=X, expand=True)
-        ttk.Button(file_row, text="Browse", command=self.on_select_file).pack(side=RIGHT, padx=(8, 0))
-
-        input_row = ttk.Frame(upload_frame)
-        input_row.pack(fill=X, pady=(8, 0))
-
-        ttk.Label(input_row, text="Photo ID").grid(row=0, column=0, sticky="w")
-        ttk.Entry(input_row, textvariable=self.photo_id_var, width=40).grid(row=1, column=0, padx=(0, 12), sticky="w")
-
-        ttk.Label(input_row, text="Content-Type").grid(row=0, column=1, sticky="w")
-        ttk.Entry(input_row, textvariable=self.content_type_var, width=35).grid(row=1, column=1, sticky="w")
-
-        ttk.Button(upload_frame, text="Upload Selected File", command=self.on_upload).pack(anchor="w", pady=(10, 0))
-
-        folder_row = ttk.Frame(upload_frame)
+        folder_row = ttk.Frame(self.sync_tab)
         folder_row.pack(fill=X, pady=(10, 0))
         ttk.Entry(folder_row, textvariable=self.selected_folder_var).pack(side=LEFT, fill=X, expand=True)
         ttk.Button(folder_row, text="Browse Folder", command=self.on_select_folder).pack(side=RIGHT, padx=(8, 0))
 
-        managed_actions_row = ttk.Frame(upload_frame)
-        managed_actions_row.pack(fill=X, pady=(8, 0))
-        ttk.Button(managed_actions_row, text="Add Managed Folder", command=self.on_add_managed_folder).pack(side=LEFT)
-        ttk.Button(managed_actions_row, text="Remove Managed Folder", command=self.on_remove_managed_folder).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(managed_actions_row, text="Run Sync Job", command=self.on_run_sync_job).pack(side=LEFT, padx=(8, 0))
+        explorer_frame = ttk.LabelFrame(self.sync_tab, text="Folder Explorer", padding=8)
+        explorer_frame.pack(fill=BOTH, expand=True, pady=(10, 0))
+        ttk.Label(
+            explorer_frame,
+            text="Use ☐/☑ to manage folders. You can click the checkbox, double-click a row, or press Space. Status: 🟢 managed · 🟡 has managed subfolders · ⚪ not managed.",
+        ).pack(anchor="w")
 
-        self.managed_folders_tree = ttk.Treeview(
-            upload_frame,
-            columns=("path", "state", "lastSync", "error"),
-            show="headings",
-            height=3,
+        explorer_tree_frame = ttk.Frame(explorer_frame)
+        explorer_tree_frame.pack(fill=BOTH, expand=True, pady=(6, 0))
+
+        self.folder_tree = ttk.Treeview(
+            explorer_tree_frame,
+            columns=("managed", "status"),
+            show="tree headings",
+            height=12,
         )
-        self.managed_folders_tree.heading("path", text="Managed Folder")
-        self.managed_folders_tree.heading("state", text="State")
-        self.managed_folders_tree.heading("lastSync", text="Last Sync")
-        self.managed_folders_tree.heading("error", text="Error")
-        self.managed_folders_tree.column("path", width=420)
-        self.managed_folders_tree.column("state", width=90)
-        self.managed_folders_tree.column("lastSync", width=170)
-        self.managed_folders_tree.column("error", width=180)
-        self.managed_folders_tree.pack(fill=X, pady=(8, 0))
+        self.folder_tree.heading("#0", text="Folder")
+        self.folder_tree.heading("managed", text="Managed")
+        self.folder_tree.heading("status", text="Sync Status")
+        self.folder_tree.column("#0", width=640, stretch=True)
+        self.folder_tree.column("managed", width=90, anchor="center", stretch=False)
+        self.folder_tree.column("status", width=220, anchor="w", stretch=True)
+        self.folder_tree.pack(side=LEFT, fill=BOTH, expand=True)
+
+        self.folder_tree.tag_configure("row-even", background=THEME_ORANGE_TREE_BG)
+        self.folder_tree.tag_configure("row-odd", background=THEME_ORANGE_TREE_ALT_BG)
+
+        folder_tree_scroll = ttk.Scrollbar(explorer_tree_frame, orient="vertical", command=self.folder_tree.yview)
+        folder_tree_scroll.pack(side=RIGHT, fill=Y)
+        self.folder_tree.configure(yscrollcommand=folder_tree_scroll.set)
+        self.folder_tree.bind("<<TreeviewOpen>>", self._on_folder_tree_open)
+        self.folder_tree.bind("<<TreeviewSelect>>", self._on_folder_tree_select)
+        self.folder_tree.bind("<Button-1>", self._on_folder_tree_click)
+        self.folder_tree.bind("<Double-1>", self._on_folder_tree_toggle_event)
+        self.folder_tree.bind("<space>", self._on_folder_tree_space_toggle)
+        self._populate_folder_tree_roots()
         self._refresh_managed_folders_tree()
-
-        queue_actions_row = ttk.Frame(upload_frame)
-        queue_actions_row.pack(fill=X, pady=(8, 0))
-        ttk.Button(queue_actions_row, text="Enqueue Folder Files", command=self.on_enqueue_folder).pack(side=LEFT)
-        ttk.Button(queue_actions_row, text="Run Upload Queue", command=self.on_run_upload_queue).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_actions_row, text="Mark Keep", command=self.on_mark_selected_keep).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_actions_row, text="Mark Reject", command=self.on_mark_selected_reject).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_actions_row, text="Retry Failed", command=self.on_retry_failed_queue_items).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_actions_row, text="Cancel Queued", command=self.on_cancel_queued_items).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_actions_row, text="Delete Rejected Local Files", command=self.on_delete_rejected_local_files).pack(side=LEFT, padx=(8, 0))
-
-        queue_config_row = ttk.Frame(upload_frame)
-        queue_config_row.pack(fill=X, pady=(8, 0))
-        ttk.Label(queue_config_row, text=f"Parallel uploads (1-{MAX_QUEUE_PARALLELISM})").pack(side=LEFT)
-        ttk.Entry(queue_config_row, textvariable=self.queue_parallelism_var, width=6).pack(side=LEFT, padx=(8, 0))
-
-        self.queue_tree = ttk.Treeview(
-            upload_frame,
-            columns=("file", "curation", "status", "message"),
-            show="headings",
-            height=5,
-        )
-        self.queue_tree.heading("file", text="File")
-        self.queue_tree.heading("curation", text="Curation")
-        self.queue_tree.heading("status", text="Status")
-        self.queue_tree.heading("message", text="Message")
-        self.queue_tree.column("file", width=260)
-        self.queue_tree.column("curation", width=90)
-        self.queue_tree.column("status", width=120)
-        self.queue_tree.column("message", width=330)
-        self.queue_tree.pack(fill=X, pady=(8, 0))
-
-        queue_manage_row = ttk.Frame(upload_frame)
-        queue_manage_row.pack(fill=X, pady=(8, 0))
-        ttk.Label(queue_manage_row, text="Queue Filter").pack(side=LEFT)
-        queue_status_values = [
-            "ALL", "QUEUED", "UPLOADING", "COMPLETED", "FAILED", "SKIPPED_VIDEO", "CANCELLED"
-        ]
-        ttk.Combobox(
-            queue_manage_row,
-            textvariable=self.queue_status_filter_var,
-            values=queue_status_values,
-            width=14,
-            state="readonly",
-        ).pack(side=LEFT, padx=(8, 0))
-        ttk.Label(queue_manage_row, text="Curation").pack(side=LEFT, padx=(10, 0))
-        ttk.Combobox(
-            queue_manage_row,
-            textvariable=self.queue_curation_filter_var,
-            values=["ALL", "KEEP", "REJECT"],
-            width=10,
-            state="readonly",
-        ).pack(side=LEFT, padx=(8, 0))
-        ttk.Entry(queue_manage_row, textvariable=self.queue_search_filter_var, width=24).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_manage_row, text="Apply", command=self.on_apply_queue_filters).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_manage_row, text="Reset", command=self.on_reset_queue_filters).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_manage_row, text="Clear Completed", command=self.on_clear_completed_queue_items).pack(side=LEFT, padx=(12, 0))
-        ttk.Button(queue_manage_row, text="Clear Failed", command=self.on_clear_failed_queue_items).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(queue_manage_row, text="Clear Skipped", command=self.on_clear_skipped_queue_items).pack(side=LEFT, padx=(8, 0))
 
         download_frame = ttk.LabelFrame(self.library_tab, text="Get Download URL", padding=10)
         download_frame.pack(fill=X, pady=(12, 0))
@@ -1273,7 +1298,7 @@ class MillerPicDesktopApp:
         self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
 
     def _on_canvas_configure(self, event):
-        self.main_canvas.itemconfigure(self.main_canvas_window, width=event.width)
+        self.main_canvas.itemconfigure(self.main_canvas_window, width=event.width, height=event.height)
 
     def _bind_mousewheel(self, _event=None):
         self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
@@ -1567,6 +1592,8 @@ class MillerPicDesktopApp:
         count = 0
         for root_dir, _, files in os.walk(folder_path):
             for file_name in files:
+                if self._is_ignored_sidecar_file(file_name):
+                    continue
                 extension = os.path.splitext(file_name)[1].lower()
                 if extension not in SUPPORTED_MEDIA_EXTENSIONS:
                     continue
@@ -1795,12 +1822,24 @@ class MillerPicDesktopApp:
             return None
 
     @staticmethod
+    def _is_ignored_sidecar_file(file_name):
+        name = os.path.basename(file_name or "")
+        if name.startswith("._"):
+            # macOS AppleDouble resource-fork sidecar (e.g. ._IMG_0008.HEIC)
+            return True
+        return name.lower() in {".ds_store", "thumbs.db", "desktop.ini"}
+
+    @staticmethod
     def _is_sync_image_file(file_name):
+        if MillerPicDesktopApp._is_ignored_sidecar_file(file_name):
+            return False
         extension = os.path.splitext(file_name)[1].lower()
         return extension in SYNC_IMAGE_EXTENSIONS
 
     @staticmethod
     def _is_sync_video_file(file_name):
+        if MillerPicDesktopApp._is_ignored_sidecar_file(file_name):
+            return False
         extension = os.path.splitext(file_name)[1].lower()
         return extension in SYNC_VIDEO_EXTENSIONS
 
@@ -1970,23 +2009,243 @@ class MillerPicDesktopApp:
             self.log(f"Could not save desktop state: {error}")
 
     def _refresh_managed_folders_tree(self):
-        for row_id in self.managed_folders_tree.get_children():
-            self.managed_folders_tree.delete(row_id)
-
-        for index, folder_path in enumerate(self.managed_folders):
-            state = self.folder_sync_state.get(folder_path) or {}
-            self.managed_folders_tree.insert(
-                "",
-                "end",
-                iid=f"folder-{index}",
-                values=(
-                    folder_path,
-                    state.get("state") or "IDLE",
-                    state.get("lastSync") or "",
-                    state.get("error") or "",
-                ),
-            )
+        self._refresh_folder_tree_statuses()
         self._update_sync_status_summary()
+
+    def _folder_tree_status(self, folder_path):
+        normalized_folder = self._normalize_path(folder_path)
+        managed_set = set(self.managed_folders)
+        if normalized_folder in managed_set:
+            return "managed"
+
+        prefix = normalized_folder if normalized_folder.endswith(os.sep) else f"{normalized_folder}{os.sep}"
+        for managed_folder in managed_set:
+            if managed_folder.startswith(prefix):
+                return "has-managed-child"
+        return "not-managed"
+
+    def _folder_tree_status_label(self, folder_path):
+        status = self._folder_tree_status(folder_path)
+        if status == "managed":
+            return "🟢 Managed"
+        if status == "has-managed-child":
+            return "🟡 Has managed subfolders"
+        return "⚪ Not managed"
+
+    def _folder_tree_icon(self, folder_path):
+        status = self._folder_tree_status(folder_path)
+        if status == "managed":
+            return self.folder_icon_managed
+        if status == "has-managed-child":
+            return self.folder_icon_has_managed_child
+        return self.folder_icon_manila
+
+    def _next_folder_tree_row_tag(self):
+        row_tag = "row-even" if (self.folder_tree_row_counter % 2) == 0 else "row-odd"
+        self.folder_tree_row_counter += 1
+        return row_tag
+
+    @staticmethod
+    def _folder_tree_display_name(folder_path):
+        folder_name = os.path.basename(folder_path.rstrip("\\/"))
+        return folder_name or folder_path
+
+    def _list_folder_tree_roots(self):
+        if os.name == "nt":
+            roots = []
+            for drive_letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                root_path = f"{drive_letter}:\\"
+                if os.path.isdir(root_path):
+                    roots.append(root_path)
+            if roots:
+                return roots
+
+        home_path = os.path.expanduser("~")
+        return [home_path] if os.path.isdir(home_path) else []
+
+    def _folder_has_visible_children(self, folder_path):
+        try:
+            with os.scandir(folder_path) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        return True
+        except OSError:
+            return False
+        return False
+
+    def _insert_folder_tree_node(self, parent_id, folder_path):
+        display_name = self._folder_tree_display_name(folder_path)
+        managed_indicator = "☑" if self._folder_tree_status(folder_path) == "managed" else "☐"
+        row_tag = self._next_folder_tree_row_tag()
+        node_id = self.folder_tree.insert(
+            parent_id,
+            "end",
+            text=display_name,
+            image=self._folder_tree_icon(folder_path),
+            values=(managed_indicator, self._folder_tree_status_label(folder_path)),
+            tags=(row_tag,),
+        )
+        self.folder_tree_paths[node_id] = self._normalize_path(folder_path)
+        if self._folder_has_visible_children(folder_path):
+            self.folder_tree.insert(node_id, "end", text="...")
+        return node_id
+
+    def _populate_folder_tree_roots(self):
+        if not hasattr(self, "folder_tree"):
+            return
+
+        self.folder_tree_paths = {}
+        self.folder_tree_loaded = set()
+        self.folder_tree_row_counter = 0
+        for item_id in self.folder_tree.get_children():
+            self.folder_tree.delete(item_id)
+
+        for root_path in self._list_folder_tree_roots():
+            self._insert_folder_tree_node("", root_path)
+
+    def _populate_folder_tree_children(self, node_id):
+        folder_path = self.folder_tree_paths.get(node_id)
+        if not folder_path:
+            return
+
+        for child_id in self.folder_tree.get_children(node_id):
+            self.folder_tree.delete(child_id)
+
+        subfolders = []
+        try:
+            with os.scandir(folder_path) as entries:
+                for entry in entries:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    subfolders.append(entry.path)
+        except OSError:
+            return
+
+        for child_path in sorted(subfolders, key=lambda path: path.lower()):
+            self._insert_folder_tree_node(node_id, child_path)
+
+        self.folder_tree_loaded.add(node_id)
+
+    def _on_folder_tree_open(self, _event=None):
+        if not hasattr(self, "folder_tree"):
+            return
+
+        node_id = self.folder_tree.focus()
+        if not node_id:
+            return
+
+        if node_id in self.folder_tree_loaded:
+            return
+
+        self._populate_folder_tree_children(node_id)
+
+    def _on_folder_tree_select(self, _event=None):
+        if not hasattr(self, "folder_tree"):
+            return
+
+        selected = self.folder_tree.selection()
+        if not selected:
+            return
+
+        folder_path = self.folder_tree_paths.get(selected[0])
+        if not folder_path:
+            return
+
+        self.selected_folder_var.set(folder_path)
+
+    def _set_folder_managed(self, folder_path, should_manage):
+        if not folder_path:
+            return
+
+        normalized_folder = self._normalize_path(folder_path)
+        if not os.path.isdir(normalized_folder):
+            return
+
+        if should_manage:
+            if normalized_folder in self.managed_folders:
+                return
+            self.managed_folders.append(normalized_folder)
+            self.managed_folders.sort()
+            self._set_folder_sync_state(normalized_folder, "IDLE")
+            self.log(f"Added managed folder: {normalized_folder}")
+        else:
+            if normalized_folder not in self.managed_folders:
+                return
+            self.managed_folders = [folder for folder in self.managed_folders if folder != normalized_folder]
+            self.folder_sync_state.pop(normalized_folder, None)
+            self.log(f"Removed managed folder: {normalized_folder}")
+
+        self._refresh_managed_folders_tree()
+        self._save_local_state()
+
+    def _on_folder_tree_click(self, event):
+        if not hasattr(self, "folder_tree"):
+            return
+
+        region = self.folder_tree.identify("region", event.x, event.y)
+        column = self.folder_tree.identify_column(event.x)
+        row_id = self.folder_tree.identify_row(event.y)
+        if region != "cell" or column != "#1" or not row_id:
+            return
+
+        folder_path = self.folder_tree_paths.get(row_id)
+        if not folder_path:
+            return
+
+        is_managed = self._normalize_path(folder_path) in set(self.managed_folders)
+        self._set_folder_managed(folder_path, not is_managed)
+        self.folder_tree.selection_set(row_id)
+        self.folder_tree.focus(row_id)
+
+    def _toggle_selected_folder_tree_managed(self):
+        if not hasattr(self, "folder_tree"):
+            return
+
+        selected = self.folder_tree.selection()
+        if not selected:
+            return
+
+        row_id = selected[0]
+        folder_path = self.folder_tree_paths.get(row_id)
+        if not folder_path:
+            return
+
+        is_managed = self._normalize_path(folder_path) in set(self.managed_folders)
+        self._set_folder_managed(folder_path, not is_managed)
+        self.folder_tree.focus(row_id)
+
+    def _on_folder_tree_toggle_event(self, event):
+        if not hasattr(self, "folder_tree"):
+            return
+
+        row_id = self.folder_tree.identify_row(event.y)
+        if not row_id or row_id not in self.folder_tree_paths:
+            return
+
+        self.folder_tree.selection_set(row_id)
+        self._toggle_selected_folder_tree_managed()
+        return "break"
+
+    def _on_folder_tree_space_toggle(self, _event=None):
+        self._toggle_selected_folder_tree_managed()
+        return "break"
+
+    def _refresh_folder_tree_statuses(self):
+        if not hasattr(self, "folder_tree"):
+            return
+
+        for node_id, folder_path in list(self.folder_tree_paths.items()):
+            if not self.folder_tree.exists(node_id):
+                self.folder_tree_paths.pop(node_id, None)
+                continue
+            display_name = self._folder_tree_display_name(folder_path)
+            managed_indicator = "☑" if self._folder_tree_status(folder_path) == "managed" else "☐"
+            self.folder_tree.item(
+                node_id,
+                text=display_name,
+                image=self._folder_tree_icon(folder_path),
+                values=(managed_indicator, self._folder_tree_status_label(folder_path)),
+            )
 
     def _set_folder_sync_state(self, folder_path, state, error=""):
         if not folder_path:
@@ -2004,11 +2263,32 @@ class MillerPicDesktopApp:
 
         self.folder_sync_state[folder_path] = payload
 
+    def _latest_saved_sync_timestamp(self):
+        latest_dt = None
+        latest_text = ""
+        for folder_path in self.managed_folders:
+            state_payload = self.folder_sync_state.get(folder_path) or {}
+            last_sync = str(state_payload.get("lastSync") or "").strip()
+            if not last_sync:
+                continue
+            try:
+                parsed = datetime.strptime(last_sync, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                if not latest_text:
+                    latest_text = last_sync
+                continue
+            if latest_dt is None or parsed > latest_dt:
+                latest_dt = parsed
+                latest_text = last_sync
+        return latest_text
+
     def _update_sync_status_summary(self):
         queued = 0
         uploading = 0
         failed = 0
         completed = 0
+        cancelled = 0
+        skipped = 0
         for item in self.upload_queue_items:
             status = (item.get("status") or "").upper()
             if status == "QUEUED":
@@ -2019,22 +2299,49 @@ class MillerPicDesktopApp:
                 failed += 1
             elif status == "COMPLETED":
                 completed += 1
+            elif status == "CANCELLED":
+                cancelled += 1
+            elif status == "SKIPPED_VIDEO":
+                skipped += 1
+
+        folder_error_count = 0
+        for folder_path in self.managed_folders:
+            folder_state = (self.folder_sync_state.get(folder_path) or {}).get("state") or ""
+            if str(folder_state).upper() == "ERROR":
+                folder_error_count += 1
+
+        latest_sync_text = self._latest_saved_sync_timestamp()
 
         self.sync_queue_summary_var.set(
             f"Queue: queued={queued}, uploading={uploading}, failed={failed}, completed={completed}"
         )
 
-        if self.upload_queue_running:
+        total = queued + uploading + failed + completed + cancelled + skipped
+        done = completed + failed + cancelled + skipped
+        progress_pct = 0.0 if total == 0 else (done / total) * 100.0
+        self.sync_progress_var.set(progress_pct)
+        self.sync_progress_label_var.set(f"Progress: {int(round(progress_pct))}%")
+
+        if self.sync_scan_running:
+            self.sync_status_var.set("Sync status: scanning folders")
+        elif self.upload_queue_running:
             self.sync_status_var.set("Sync status: running")
-        elif failed > 0:
+        elif failed > 0 or folder_error_count > 0:
             self.sync_status_var.set("Sync status: attention needed (failures)")
         elif queued > 0:
             self.sync_status_var.set("Sync status: ready to run")
+        elif latest_sync_text:
+            self.sync_status_var.set(f"Sync status: last synced {latest_sync_text}")
+        elif self.managed_folders:
+            self.sync_status_var.set("Sync status: ready (never synced)")
         else:
             self.sync_status_var.set("Sync status: idle")
 
         if uploading <= 0:
-            self.sync_eta_var.set("ETA: n/a")
+            if latest_sync_text:
+                self.sync_eta_var.set(f"Last sync: {latest_sync_text}")
+            else:
+                self.sync_eta_var.set("Last sync: n/a")
             return
 
         pending = queued + uploading
@@ -2057,35 +2364,27 @@ class MillerPicDesktopApp:
             messagebox.showerror("Invalid folder", "Selected folder path does not exist.")
             return
 
-        normalized_folder = self._normalize_path(folder_path)
-        if normalized_folder in self.managed_folders:
-            self.log(f"Folder already managed: {normalized_folder}")
-            return
-
-        self.managed_folders.append(normalized_folder)
-        self.managed_folders.sort()
-        self._set_folder_sync_state(normalized_folder, "IDLE")
-        self._refresh_managed_folders_tree()
-        self._save_local_state()
-        self.log(f"Added managed folder: {normalized_folder}")
+        self._set_folder_managed(folder_path, True)
 
     def on_remove_managed_folder(self):
-        selected = self.managed_folders_tree.selection()
-        if not selected:
-            messagebox.showerror("No selection", "Select a managed folder row to remove.")
+        folder_path = ""
+
+        if hasattr(self, "folder_tree"):
+            selected = self.folder_tree.selection()
+            if selected:
+                folder_path = self.folder_tree_paths.get(selected[0]) or ""
+
+        if not folder_path:
+            selected_folder = self.selected_folder_var.get().strip()
+            normalized_selected = self._normalize_path(selected_folder) if selected_folder else ""
+            if normalized_selected in self.managed_folders:
+                folder_path = normalized_selected
+
+        if not folder_path:
+            messagebox.showerror("No selection", "Select a managed folder to stop syncing.")
             return
 
-        selected_id = selected[0]
-        values = self.managed_folders_tree.item(selected_id, "values")
-        if not values:
-            return
-        folder_path = values[0]
-
-        self.managed_folders = [folder for folder in self.managed_folders if folder != folder_path]
-        self.folder_sync_state.pop(folder_path, None)
-        self._refresh_managed_folders_tree()
-        self._save_local_state()
-        self.log(f"Removed managed folder: {folder_path}")
+        self._set_folder_managed(folder_path, False)
 
     def _queue_has_path(self, path_key):
         for item in self.upload_queue_items:
@@ -2101,19 +2400,7 @@ class MillerPicDesktopApp:
                 return item
         return None
 
-    def on_run_sync_job(self):
-        headers = self._headers()
-        if not headers:
-            return
-
-        if self.upload_queue_running:
-            self.log("Upload queue is already running.")
-            return
-
-        if not self.managed_folders:
-            messagebox.showerror("No managed folders", "Add at least one managed folder before running sync.")
-            return
-
+    def _collect_sync_scan_result(self, managed_folders, synced_files, active_path_keys, skipped_video_paths):
         added_count = 0
         skipped_known_count = 0
         skipped_video_count = 0
@@ -2121,47 +2408,46 @@ class MillerPicDesktopApp:
         missing_folder_count = 0
         seen_hashes_this_scan = set()
 
-        for managed_folder in self.managed_folders:
+        local_active_paths = set(active_path_keys)
+        local_skipped_video_paths = set(skipped_video_paths)
+        folder_state_updates = {}
+        new_queue_items = []
+        missing_folders = []
+
+        for managed_folder in managed_folders:
             if not os.path.isdir(managed_folder):
                 missing_folder_count += 1
-                self._set_folder_sync_state(managed_folder, "ERROR", "folder missing")
-                self.log(f"Managed folder not found, skipping: {managed_folder}")
+                folder_state_updates[managed_folder] = ("ERROR", "folder missing")
+                missing_folders.append(managed_folder)
                 continue
-
-            self._set_folder_sync_state(managed_folder, "SYNCING")
 
             for root_dir, _, files in os.walk(managed_folder):
                 for file_name in files:
-                    if self._is_sync_video_file(file_name):
-                        file_path = os.path.join(root_dir, file_name)
-                        path_key = self._normalize_path(file_path)
-                        reason = "video upload disabled by sync policy"
-                        skipped_video_count += 1
+                    file_path = os.path.join(root_dir, file_name)
+                    path_key = self._normalize_path(file_path)
 
-                        existing_skip = self._queue_find_item(path_key, "SKIPPED_VIDEO")
-                        if existing_skip:
-                            existing_skip.setdefault("curation", "REJECT")
-                            existing_skip["message"] = reason
-                            self._queue_update_item(existing_skip["photoId"], "SKIPPED_VIDEO", reason)
-                        else:
-                            queue_item = {
+                    if self._is_sync_video_file(file_name):
+                        skipped_video_count += 1
+                        if path_key in local_skipped_video_paths:
+                            continue
+
+                        local_skipped_video_paths.add(path_key)
+                        new_queue_items.append(
+                            {
                                 "filePath": file_path,
                                 "fileName": file_name,
                                 "photoId": uuid.uuid4().hex,
                                 "curation": "REJECT",
                                 "status": "SKIPPED_VIDEO",
-                                "message": reason,
+                                "message": "video upload disabled by sync policy",
                                 "pathKey": path_key,
                             }
-                            self.upload_queue_items.append(queue_item)
-                            self._queue_insert_item(queue_item)
+                        )
                         continue
 
                     if not self._is_sync_image_file(file_name):
                         continue
 
-                    file_path = os.path.join(root_dir, file_name)
-                    path_key = self._normalize_path(file_path)
                     signature = self._build_file_signature(file_path)
                     if not signature:
                         continue
@@ -2170,7 +2456,7 @@ class MillerPicDesktopApp:
                     if not content_hash:
                         continue
 
-                    known_entry = self.synced_files.get(path_key)
+                    known_entry = synced_files.get(path_key)
                     if known_entry and known_entry.get("signature") == signature:
                         skipped_known_count += 1
                         continue
@@ -2179,34 +2465,84 @@ class MillerPicDesktopApp:
                         duplicate_candidate_count += 1
                     seen_hashes_this_scan.add(content_hash)
 
-                    if self._queue_has_path(path_key):
+                    if path_key in local_active_paths:
                         continue
 
-                    queue_item = {
-                        "filePath": file_path,
-                        "fileName": file_name,
-                        "photoId": uuid.uuid4().hex,
-                        "curation": "KEEP",
-                        "status": "QUEUED",
-                        "message": "sync-new",
-                        "pathKey": path_key,
-                        "signature": signature,
-                        "contentHash": content_hash,
-                        "subjects": self._build_subjects_for_file(file_path, managed_folder),
-                    }
-                    self.upload_queue_items.append(queue_item)
-                    self._queue_insert_item(queue_item)
+                    local_active_paths.add(path_key)
+                    new_queue_items.append(
+                        {
+                            "filePath": file_path,
+                            "fileName": file_name,
+                            "photoId": uuid.uuid4().hex,
+                            "curation": "KEEP",
+                            "status": "QUEUED",
+                            "message": "sync-new",
+                            "pathKey": path_key,
+                            "signature": signature,
+                            "contentHash": content_hash,
+                            "subjects": self._build_subjects_for_file(file_path, managed_folder),
+                        }
+                    )
                     added_count += 1
 
-                    self._set_folder_sync_state(managed_folder, "HEALTHY")
+            folder_state_updates[managed_folder] = ("HEALTHY", "")
+
+        return {
+            "added_count": added_count,
+            "skipped_known_count": skipped_known_count,
+            "skipped_video_count": skipped_video_count,
+            "duplicate_candidate_count": duplicate_candidate_count,
+            "missing_folder_count": missing_folder_count,
+            "new_queue_items": new_queue_items,
+            "folder_state_updates": folder_state_updates,
+            "missing_folders": missing_folders,
+        }
+
+    def _run_sync_scan_worker(self, headers, managed_folders, synced_files, active_path_keys, skipped_video_paths):
+        try:
+            result = self._collect_sync_scan_result(
+                managed_folders,
+                synced_files,
+                active_path_keys,
+                skipped_video_paths,
+            )
+            self.root.after(0, lambda: self._apply_sync_scan_result(headers, result))
+        except Exception as error:
+            self.root.after(0, lambda: self._handle_sync_scan_failure(error))
+
+    def _handle_sync_scan_failure(self, error):
+        self.sync_scan_running = False
+        self.log(f"Sync scan failed: {error}")
+        self._refresh_managed_folders_tree()
+
+    def _apply_sync_scan_result(self, headers, result):
+        self.sync_scan_running = False
+
+        for folder_path, state_pair in (result.get("folder_state_updates") or {}).items():
+            state_value, error_text = state_pair
+            self._set_folder_sync_state(folder_path, state_value, error_text)
+
+        for queue_item in (result.get("new_queue_items") or []):
+            path_key = queue_item.get("pathKey")
+            status = (queue_item.get("status") or "").upper()
+            if status == "QUEUED" and self._queue_has_path(path_key):
+                continue
+            self.upload_queue_items.append(queue_item)
+            self._queue_insert_item(queue_item)
+
+        for missing_folder in (result.get("missing_folders") or []):
+            self.log(f"Managed folder not found, skipping: {missing_folder}")
 
         self.log(
             "Sync scan complete. "
-            f"Queued new files: {added_count}, Already synced: {skipped_known_count}, "
-            f"Skipped videos: {skipped_video_count}, Duplicate candidates: {duplicate_candidate_count}, "
-            f"Missing folders: {missing_folder_count}"
+            f"Queued new files: {result.get('added_count', 0)}, "
+            f"Already synced: {result.get('skipped_known_count', 0)}, "
+            f"Skipped videos: {result.get('skipped_video_count', 0)}, "
+            f"Duplicate candidates: {result.get('duplicate_candidate_count', 0)}, "
+            f"Missing folders: {result.get('missing_folder_count', 0)}"
         )
         self._refresh_managed_folders_tree()
+        self._save_local_state()
 
         queued_items = [item for item in self.upload_queue_items if item.get("status") == "QUEUED"]
         if not queued_items:
@@ -2217,12 +2553,56 @@ class MillerPicDesktopApp:
         if max_parallel is None:
             return
 
+        duplicate_candidate_count = int(result.get("duplicate_candidate_count") or 0)
         if duplicate_candidate_count > 0 and max_parallel > 1:
             self.log("Duplicate candidates detected; running sync queue in serial mode for deterministic dedupe linking.")
             max_parallel = 1
 
         self.upload_queue_running = True
         self._run_in_thread(self._run_upload_queue_flow, headers, max_parallel)
+
+    def on_run_sync_job(self):
+        headers = self._headers()
+        if not headers:
+            return
+
+        if self.sync_scan_running:
+            self.log("Sync scan is already running.")
+            return
+
+        if self.upload_queue_running:
+            self.log("Upload queue is already running.")
+            return
+
+        if not self.managed_folders:
+            messagebox.showerror("No managed folders", "Add at least one managed folder before running sync.")
+            return
+
+        self.sync_scan_running = True
+        for managed_folder in self.managed_folders:
+            self._set_folder_sync_state(managed_folder, "SYNCING")
+        self._refresh_managed_folders_tree()
+        self.log("Scanning managed folders in background...")
+
+        active_path_keys = {
+            item.get("pathKey")
+            for item in self.upload_queue_items
+            if item.get("pathKey") and (item.get("status") or "").upper() in {"QUEUED", "UPLOADING"}
+        }
+        skipped_video_paths = {
+            item.get("pathKey")
+            for item in self.upload_queue_items
+            if item.get("pathKey") and (item.get("status") or "").upper() == "SKIPPED_VIDEO"
+        }
+
+        self._run_in_thread(
+            self._run_sync_scan_worker,
+            headers,
+            list(self.managed_folders),
+            dict(self.synced_files),
+            active_path_keys,
+            skipped_video_paths,
+        )
 
     def on_enqueue_folder(self):
         folder_path = self.selected_folder_var.get().strip()
@@ -2237,6 +2617,8 @@ class MillerPicDesktopApp:
         queued_count = 0
         for root_dir, _, files in os.walk(folder_path):
             for file_name in files:
+                if self._is_ignored_sidecar_file(file_name):
+                    continue
                 extension = os.path.splitext(file_name)[1].lower()
                 if extension not in SUPPORTED_MEDIA_EXTENSIONS:
                     continue
@@ -2353,6 +2735,10 @@ class MillerPicDesktopApp:
     def _refresh_queue_tree_view(self):
         self._queue_refresh_scheduled = False
 
+        if not hasattr(self, "queue_tree"):
+            self._update_sync_status_summary()
+            return
+
         for item_id in self.queue_tree.get_children():
             self.queue_tree.delete(item_id)
 
@@ -2403,6 +2789,9 @@ class MillerPicDesktopApp:
         self._schedule_queue_refresh()
 
     def _get_selected_queue_items(self):
+        if not hasattr(self, "queue_tree"):
+            return []
+
         selected_ids = self.queue_tree.selection()
         if not selected_ids:
             return []
