@@ -32,3 +32,12 @@ def test_sync_image_filter_rejects_sidecar_but_accepts_real_photo():
 def test_sync_video_filter_rejects_sidecar():
     assert MillerPicDesktopApp._is_sync_video_file("._clip.mov") is False
     assert MillerPicDesktopApp._is_sync_video_file("clip.mov") is True
+
+
+def test_format_size_is_human_readable():
+    assert MillerPicDesktopApp._format_size(0) == "0 B"
+    assert MillerPicDesktopApp._format_size(512) == "512 B"
+    assert MillerPicDesktopApp._format_size(1024) == "1.0 KB"
+    assert MillerPicDesktopApp._format_size(195000000) == "186.0 MB"
+    assert MillerPicDesktopApp._format_size(5 * 1024 ** 3) == "5.0 GB"
+

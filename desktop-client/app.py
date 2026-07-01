@@ -29,11 +29,19 @@ from thumbnail_hydration import (
 )
 
 try:
-    from PIL import ExifTags, Image, ImageTk
+    from PIL import ExifTags, Image, ImageOps, ImageTk
 except Exception:
     ExifTags = None
     Image = None
+    ImageOps = None
     ImageTk = None
+
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except Exception:
+    pillow_heif = None
 
 
 DEFAULT_API_BASE_URL = "https://09ew2nqn27.execute-api.us-east-1.amazonaws.com"
@@ -508,7 +516,8 @@ class MillerPicDesktopApp:
 
         curation_actions_row = ttk.Frame(curation_frame)
         curation_actions_row.pack(fill=X, pady=(8, 0))
-        ttk.Button(curation_actions_row, text="Compare 2 Selected", command=self.on_curation_compare_selected).pack(side=LEFT)
+        ttk.Button(curation_actions_row, text="Review Photos", command=self.on_curation_open_review).pack(side=LEFT)
+        ttk.Button(curation_actions_row, text="Compare 2 Selected", command=self.on_curation_compare_selected).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Rotate Left", command=self.on_curation_rotate_left).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Rotate Right", command=self.on_curation_rotate_right).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Mark KEEP", command=self.on_curation_mark_keep).pack(side=LEFT, padx=(8, 0))
@@ -1603,12 +1612,18 @@ class MillerPicDesktopApp:
                 except OSError:
                     continue
 
+                try:
+                    size_bytes = os.path.getsize(file_path)
+                except OSError:
+                    size_bytes = 0
+
                 item = {
                     "id": f"curation-{uuid.uuid4().hex}",
                     "filePath": file_path,
                     "fileName": file_name,
                     "decision": "UNSET",
                     "labels": [],
+                    "sizeBytes": size_bytes,
                     "group": self._curation_group_key(file_path, modified_epoch),
                     "modifiedAt": datetime.fromtimestamp(modified_epoch).strftime("%Y-%m-%d %H:%M:%S"),
                 }
@@ -1791,6 +1806,322 @@ class MillerPicDesktopApp:
             queued += 1
 
         self.curation_status_var.set(f"Curation: queued {queued} KEEP items for upload")
+
+    # ----- Review mode (keyboard-driven curation) -----
+
+    @staticmethod
+    def _format_size(num_bytes):
+        size = float(num_bytes or 0)
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024 or unit == "GB":
+                if unit == "B":
+                    return f"{int(size)} {unit}"
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} GB"
+
+    def _curation_item_size(self, item):
+        size = item.get("sizeBytes")
+        if size is None:
+            try:
+                size = os.path.getsize(item.get("filePath") or "")
+            except OSError:
+                size = 0
+            item["sizeBytes"] = size
+        return size
+
+    def on_curation_open_review(self):
+        if not self.curation_items:
+            messagebox.showinfo("Nothing to review", "Scan a folder first, then review photos.")
+            return
+        if Image is None or ImageTk is None:
+            messagebox.showerror("Missing dependency", "Pillow is required for photo review.")
+            return
+        if getattr(self, "_review_window", None) is not None:
+            try:
+                self._review_window.lift()
+                return
+            except Exception:
+                self._review_window = None
+
+        self._review_index = 0
+        # Start on the first undecided photo if there is one.
+        for idx, item in enumerate(self.curation_items):
+            if (item.get("decision") or "UNSET").upper() == "UNSET":
+                self._review_index = idx
+                break
+
+        window = tk.Toplevel(self.root)
+        window.title("Review Photos")
+        window.geometry("1040x780")
+        window.configure(background=THEME_ORANGE_BG)
+        window.protocol("WM_DELETE_WINDOW", self._review_close)
+        self._review_window = window
+
+        header = ttk.Frame(window, padding=(12, 10))
+        header.pack(fill=X)
+        self._review_position_var = tk.StringVar()
+        ttk.Label(header, textvariable=self._review_position_var, font=("Segoe UI", 12, "bold")).pack(side=LEFT)
+        ttk.Label(header, text="Frame:  green = save   ·   red = drop   ·   gray = undecided").pack(side=RIGHT)
+
+        # Filmstrip: previous 2, current (large center), next 2. Each photo is
+        # wrapped in a colored frame that reflects its keep/drop/undecided state.
+        strip = tk.Frame(window, background=THEME_ORANGE_BG)
+        strip.pack(fill=BOTH, expand=True, padx=12, pady=(0, 8))
+        self._review_strip = strip
+        self._review_last_strip_w = 0
+        self._review_last_strip_h = 0
+        self._review_slots = []
+        for col, offset in enumerate((-2, -1, 0, 1, 2)):
+            strip.columnconfigure(col, weight=1)
+            border = tk.Frame(strip, background=THEME_ORANGE_BG)
+            border.grid(row=0, column=col, padx=6)
+            inner = tk.Label(border, background=THEME_ORANGE_TREE_BG, anchor="center")
+            inner.pack()
+            self._review_slots.append({"offset": offset, "border": border, "inner": inner})
+        strip.rowconfigure(0, weight=1)
+        strip.bind("<Configure>", self._on_review_strip_resize)
+        self._review_source_cache = {}
+
+        label_row = ttk.Frame(window, padding=(12, 0))
+        label_row.pack(fill=X)
+        ttk.Label(label_row, text="Labels (Enter to add):").pack(side=LEFT)
+        self._review_label_var = tk.StringVar()
+        self._review_label_entry = ttk.Entry(label_row, textvariable=self._review_label_var, width=48)
+        self._review_label_entry.pack(side=LEFT, padx=(8, 0))
+        self._review_label_entry.bind("<Return>", self._review_add_labels)
+        self._review_current_labels_var = tk.StringVar()
+        ttk.Label(label_row, textvariable=self._review_current_labels_var).pack(side=LEFT, padx=(12, 0))
+
+        controls = ttk.Frame(window, padding=(12, 8))
+        controls.pack(fill=X)
+        ttk.Button(controls, text="◀ Prev (←)", command=self._review_prev).pack(side=LEFT)
+        ttk.Button(controls, text="Drop (D)", command=lambda: self._review_set_decision("REJECT")).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(controls, text="Save (S)", command=lambda: self._review_set_decision("KEEP")).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(controls, text="Next ▶ (→)", command=self._review_next).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(controls, text="Queue Keepers ▶ Upload", command=self._review_queue_all_keepers).pack(side=RIGHT)
+
+        impact = ttk.Frame(window, padding=(12, 0))
+        impact.pack(fill=X, pady=(0, 10))
+        self._review_impact_var = tk.StringVar()
+        ttk.Label(impact, textvariable=self._review_impact_var, font=("Segoe UI", 10)).pack(side=LEFT)
+
+        hint = "Shortcuts:  S save (keep)   ·   D drop (reject)   ·   ← / → navigate   ·   U undo decision   ·   Esc close"
+        ttk.Label(window, text=hint, padding=(12, 0, 12, 10)).pack(fill=X)
+
+        for sequence in ("<Key-s>", "<Key-S>"):
+            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_set_decision("KEEP")))
+        for sequence in ("<Key-d>", "<Key-D>"):
+            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_set_decision("REJECT")))
+        for sequence in ("<Key-u>", "<Key-U>"):
+            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_set_decision("UNSET", advance=False)))
+        window.bind("<Right>", lambda e: self._review_shortcut(self._review_next))
+        window.bind("<Left>", lambda e: self._review_shortcut(self._review_prev))
+        window.bind("<Escape>", lambda e: self._review_close())
+
+        self._review_show_current()
+        window.focus_set()
+
+    def _review_is_typing(self):
+        try:
+            return self._review_window.focus_get() is self._review_label_entry
+        except Exception:
+            return False
+
+    def _review_shortcut(self, action):
+        if self._review_is_typing():
+            return
+        action()
+
+    def _review_current_item(self):
+        if not self.curation_items:
+            return None
+        self._review_index = max(0, min(self._review_index, len(self.curation_items) - 1))
+        return self.curation_items[self._review_index]
+
+    def _review_show_current(self):
+        item = self._review_current_item()
+        if item is None:
+            return
+        total = len(self.curation_items)
+        self._review_position_var.set(f"{self._review_index + 1} / {total}   —   {item.get('fileName') or ''}")
+
+        labels = item.get("labels") or []
+        self._review_current_labels_var.set(("Labels: " + ", ".join(labels)) if labels else "No labels")
+        self._review_label_var.set("")
+
+        self._review_render_strip()
+        self._review_update_impact()
+
+    @staticmethod
+    def _review_decision_color(decision):
+        return {
+            "KEEP": "#2E7D32",
+            "REJECT": "#C62828",
+        }.get((decision or "UNSET").upper(), "#A9A093")
+
+    def _review_source_image(self, file_path):
+        if file_path in self._review_source_cache:
+            return self._review_source_cache[file_path]
+        source = None
+        try:
+            with Image.open(file_path) as image:
+                prepared = ImageOps.exif_transpose(image) if ImageOps is not None else image
+                prepared = prepared.convert("RGB")
+                prepared.thumbnail((1600, 1600))
+                source = prepared.copy()
+        except Exception:
+            source = None
+        if len(self._review_source_cache) > 24:
+            self._review_source_cache.clear()
+        self._review_source_cache[file_path] = source
+        return source
+
+    def _on_review_strip_resize(self, event):
+        if getattr(self, "_review_window", None) is None:
+            return
+        if abs(event.width - self._review_last_strip_w) < 12 and abs(event.height - self._review_last_strip_h) < 12:
+            return
+        self._review_last_strip_w = event.width
+        self._review_last_strip_h = event.height
+        self._review_render_strip()
+
+    def _review_render_strip(self):
+        strip = getattr(self, "_review_strip", None)
+        width = strip.winfo_width() if strip is not None else 0
+        height = strip.winfo_height() if strip is not None else 0
+        if width <= 1:
+            width = 1000
+        if height <= 1:
+            height = 560
+        # Center photo dominates; neighbors scale down outward. Width fractions
+        # sum to < 1 to leave room for padding and colored frames.
+        slot_size = {
+            0: (int(width * 0.44), int(height * 0.94)),
+            1: (int(width * 0.17), int(height * 0.60)),
+            2: (int(width * 0.09), int(height * 0.34)),
+        }
+        slot_border = {0: 6, 1: 4, 2: 3}
+        total = len(self.curation_items)
+        for slot in self._review_slots:
+            offset = slot["offset"]
+            border = slot["border"]
+            inner = slot["inner"]
+            index = self._review_index + offset
+            if index < 0 or index >= total:
+                inner.configure(image="", text="")
+                inner.image = None
+                inner.pack_configure(padx=0, pady=0)
+                border.configure(background=THEME_ORANGE_BG)
+                continue
+
+            item = self.curation_items[index]
+            source = self._review_source_image(item.get("filePath"))
+            border.configure(background=self._review_decision_color(item.get("decision")))
+            inner.pack_configure(padx=slot_border[abs(offset)], pady=slot_border[abs(offset)])
+            box = slot_size[abs(offset)]
+            if source is not None and box[0] > 1 and box[1] > 1:
+                resized = source.copy()
+                resized.thumbnail(box)
+                image_tk = ImageTk.PhotoImage(resized)
+                inner.configure(image=image_tk, text="")
+                inner.image = image_tk
+            else:
+                inner.configure(image="", text="(no preview)")
+                inner.image = None
+
+    def _review_set_decision(self, decision, advance=True):
+        item = self._review_current_item()
+        if item is None:
+            return
+        item["decision"] = decision
+        self._refresh_curation_item_row(item)
+        if advance and decision in ("KEEP", "REJECT"):
+            self._review_advance()
+        else:
+            self._review_show_current()
+
+    def _review_advance(self):
+        if self._review_index < len(self.curation_items) - 1:
+            self._review_index += 1
+        self._review_show_current()
+
+    def _review_next(self):
+        self._review_advance()
+
+    def _review_prev(self):
+        if self._review_index > 0:
+            self._review_index -= 1
+        self._review_show_current()
+
+    def _review_add_labels(self, _event=None):
+        item = self._review_current_item()
+        if item is None:
+            return
+        labels = self._dedupe_subjects(self._parse_subjects_csv(self._review_label_var.get()))
+        if not labels:
+            return
+        item["labels"] = self._dedupe_subjects((item.get("labels") or []) + labels)
+        self._refresh_curation_item_row(item)
+        self._review_label_var.set("")
+        self._review_current_labels_var.set("Labels: " + ", ".join(item.get("labels") or []))
+
+    def _review_update_impact(self):
+        kept = [i for i in self.curation_items if (i.get("decision") or "").upper() == "KEEP"]
+        rejected = [i for i in self.curation_items if (i.get("decision") or "").upper() == "REJECT"]
+        total = len(self.curation_items)
+        reviewed = len(kept) + len(rejected)
+        kept_bytes = sum(self._curation_item_size(i) for i in kept)
+        rejected_bytes = sum(self._curation_item_size(i) for i in rejected)
+        self._review_impact_var.set(
+            f"Reviewed {reviewed}/{total}   ·   "
+            f"KEEP {len(kept)} ({self._format_size(kept_bytes)} to upload)   ·   "
+            f"REJECT {len(rejected)}   ·   "
+            f"~{self._format_size(rejected_bytes)} saved from the cloud"
+        )
+
+    def _review_queue_all_keepers(self):
+        keep_items = [i for i in self.curation_items if (i.get("decision") or "").upper() == "KEEP"]
+        if not keep_items:
+            messagebox.showinfo("No keepers yet", "Mark some photos KEEP before queueing.")
+            return
+        queued = 0
+        for item in keep_items:
+            file_path = item.get("filePath")
+            if not file_path or not os.path.isfile(file_path):
+                continue
+            path_key = self._normalize_path(file_path)
+            if self._queue_has_path(path_key):
+                continue
+            subjects = self._dedupe_subjects(
+                self._build_subjects_for_file(file_path) + (item.get("labels") or [])
+            )
+            queue_item = {
+                "filePath": file_path,
+                "fileName": item.get("fileName") or os.path.basename(file_path),
+                "photoId": uuid.uuid4().hex,
+                "curation": "KEEP",
+                "status": "QUEUED",
+                "message": "curation-keep",
+                "pathKey": path_key,
+                "signature": self._build_file_signature(file_path),
+                "contentHash": self._compute_content_hash(file_path),
+                "subjects": subjects,
+            }
+            self.upload_queue_items.append(queue_item)
+            self._queue_insert_item(queue_item)
+            queued += 1
+        self.curation_status_var.set(f"Curation: queued {queued} KEEP items for upload")
+        messagebox.showinfo("Queued for upload", f"Queued {queued} keeper(s) for upload.")
+
+    def _review_close(self):
+        window = getattr(self, "_review_window", None)
+        self._review_window = None
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception:
+                pass
 
     def _desktop_state_file_path(self):
         return os.environ.get("MILLERPIC_DESKTOP_STATE_FILE") or DEFAULT_DESKTOP_STATE_FILE
