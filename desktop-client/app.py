@@ -518,7 +518,6 @@ class MillerPicDesktopApp:
         curation_actions_row = ttk.Frame(curation_frame)
         curation_actions_row.pack(fill=X, pady=(8, 0))
         ttk.Button(curation_actions_row, text="Review Photos", command=self.on_curation_open_review).pack(side=LEFT)
-        ttk.Button(curation_actions_row, text="Compare 2 Selected", command=self.on_curation_compare_selected).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Rotate Left", command=self.on_curation_rotate_left).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Rotate Right", command=self.on_curation_rotate_right).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Mark KEEP", command=self.on_curation_mark_keep).pack(side=LEFT, padx=(8, 0))
@@ -1844,43 +1843,6 @@ class MillerPicDesktopApp:
 
     def on_curation_rotate_right(self):
         self._curation_rotate_selected(-90)
-
-    def on_curation_compare_selected(self):
-        selected_items = self._get_selected_curation_items()
-        if len(selected_items) != 2:
-            messagebox.showerror("Select 2 items", "Select exactly two curation items to compare.")
-            return
-
-        if Image is None or ImageTk is None:
-            messagebox.showerror("Missing dependency", "Pillow is required for side-by-side compare.")
-            return
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Compare Selected Photos")
-        dialog.geometry("980x520")
-        frame = ttk.Frame(dialog, padding=10)
-        frame.pack(fill=BOTH, expand=True)
-
-        labels = []
-        for index, item in enumerate(selected_items):
-            file_path = item.get("filePath")
-            panel = ttk.Frame(frame)
-            panel.grid(row=0, column=index, padx=8, sticky="n")
-            ttk.Label(panel, text=item.get("fileName") or "").pack()
-            try:
-                with Image.open(file_path) as image:
-                    prepared = image.convert("RGB")
-                    prepared.thumbnail((440, 440))
-                    image_tk = ImageTk.PhotoImage(prepared)
-                image_label = ttk.Label(panel, image=image_tk)
-                image_label.image = image_tk
-                image_label.pack(pady=(6, 0))
-                labels.append(image_label)
-            except Exception as error:
-                ttk.Label(panel, text=f"Preview unavailable: {error}").pack(pady=(6, 0))
-
-        frame.columnconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=1)
 
     def on_curation_queue_keep_for_upload(self):
         selected_items = self._get_selected_curation_items()
