@@ -2042,6 +2042,8 @@ class MillerPicDesktopApp:
         self._review_last_stage_w = 0
         self._review_last_stage_h = 0
         self._review_rebuild_groups(reset_position=True)
+        self._review_known_labels = []
+        self._review_seed_known_labels()
 
         window = tk.Toplevel(self.root)
         window.title("Review Photos")
@@ -2090,15 +2092,19 @@ class MillerPicDesktopApp:
         self._review_thumbs_frame = tk.Frame(burst, background=THEME_ORANGE_BG)
         self._review_thumbs_frame.pack(fill=X, pady=(4, 0))
 
-        label_row = ttk.Frame(window, padding=(12, 0))
-        label_row.pack(fill=X)
-        ttk.Label(label_row, text="Labels (Enter to add):").pack(side=LEFT)
+        label_bar = ttk.Frame(window, padding=(12, 2))
+        label_bar.pack(fill=X)
+        top = ttk.Frame(label_bar)
+        top.pack(fill=X)
+        ttk.Label(top, text="Labels:").pack(side=LEFT)
         self._review_label_var = tk.StringVar()
-        self._review_label_entry = ttk.Entry(label_row, textvariable=self._review_label_var, width=44)
+        self._review_label_entry = ttk.Entry(top, textvariable=self._review_label_var, width=26)
         self._review_label_entry.pack(side=LEFT, padx=(8, 0))
-        self._review_label_entry.bind("<Return>", self._review_add_labels)
-        self._review_current_labels_var = tk.StringVar()
-        ttk.Label(label_row, textvariable=self._review_current_labels_var).pack(side=LEFT, padx=(12, 0))
+        self._review_label_entry.bind("<Return>", self._review_commit_label_entry)
+        self._review_label_entry.bind("<KeyRelease>", self._review_on_label_filter)
+        ttk.Label(top, text="type to filter · Enter to create/apply · click a chip to add or remove").pack(side=LEFT, padx=(10, 0))
+        self._review_chip_frame = tk.Frame(label_bar, background=THEME_ORANGE_BG)
+        self._review_chip_frame.pack(fill=X, pady=(4, 0))
 
         controls = ttk.Frame(window, padding=(12, 8))
         controls.pack(fill=X)
@@ -2219,9 +2225,8 @@ class MillerPicDesktopApp:
             )
             self._review_render_filmstrip()
 
-        labels = item.get("labels") or []
-        self._review_current_labels_var.set(("Labels: " + ", ".join(labels)) if labels else "No labels")
         self._review_label_var.set("")
+        self._review_render_labels()
         self._review_update_impact()
 
     def _review_render_filmstrip(self):
@@ -2407,17 +2412,109 @@ class MillerPicDesktopApp:
         self._review_source_cache[file_path] = source
         return source
 
-    def _review_add_labels(self, _event=None):
+    def _review_seed_known_labels(self):
+        known = []
+        for item in self.curation_items:
+            for label in item.get("labels") or []:
+                normalized = self._normalize_subject_label(label)
+                if normalized and normalized not in known:
+                    known.append(normalized)
+        folder = self.curation_folder_var.get() or ""
+        base = os.path.basename(os.path.normpath(folder)) if folder else ""
+        folder_label = self._normalize_subject_label(base.replace("_", " ").replace("-", " "))
+        if folder_label and folder_label not in known:
+            known.append(folder_label)
+        self._review_known_labels = known
+
+    def _review_add_known_label(self, label):
+        normalized = self._normalize_subject_label(label)
+        if normalized and normalized not in self._review_known_labels:
+            self._review_known_labels.append(normalized)
+        return normalized
+
+    def _review_toggle_label(self, label):
         item = self._review_focused_item()
         if item is None:
             return
-        labels = self._dedupe_subjects(self._parse_subjects_csv(self._review_label_var.get()))
-        if not labels:
+        normalized = self._review_add_known_label(label)
+        if not normalized:
             return
-        item["labels"] = self._dedupe_subjects((item.get("labels") or []) + labels)
+        current = self._dedupe_subjects(item.get("labels") or [])
+        if normalized in current:
+            current = [existing for existing in current if existing != normalized]
+        else:
+            current.append(normalized)
+        item["labels"] = current
+        self._refresh_curation_item_row(item)
+        self._review_render_labels()
+
+    def _review_commit_label_entry(self, _event=None):
+        normalized = self._normalize_subject_label(self._review_label_var.get())
+        if not normalized:
+            return
+        item = self._review_focused_item()
+        if item is None:
+            return
+        self._review_add_known_label(normalized)
+        item["labels"] = self._dedupe_subjects((item.get("labels") or []) + [normalized])
         self._refresh_curation_item_row(item)
         self._review_label_var.set("")
-        self._review_current_labels_var.set("Labels: " + ", ".join(item.get("labels") or []))
+        self._review_render_labels()
+
+    def _review_on_label_filter(self, event=None):
+        if event is not None and event.keysym in ("Return", "Escape"):
+            return
+        self._review_render_labels()
+
+    def _review_render_labels(self):
+        frame = getattr(self, "_review_chip_frame", None)
+        if frame is None:
+            return
+        for widget in frame.winfo_children():
+            widget.destroy()
+        item = self._review_focused_item()
+        active = set(self._dedupe_subjects(item.get("labels") or [])) if item else set()
+        filter_text = self._normalize_subject_label(self._review_label_var.get())
+        shown = 0
+        for label in self._review_known_labels:
+            if filter_text and filter_text not in label:
+                continue
+            is_active = label in active
+            chip = tk.Button(
+                frame,
+                text=("✓ " + label) if is_active else label,
+                relief="flat",
+                cursor="hand2",
+                borderwidth=0,
+                padx=8,
+                pady=2,
+                background=THEME_ORANGE_ACCENT if is_active else THEME_ORANGE_PANEL,
+                foreground="#FFFFFF" if is_active else THEME_ORANGE_TEXT,
+                activebackground=THEME_ORANGE_ACCENT_HOVER,
+                command=lambda chosen=label: self._review_toggle_label(chosen),
+            )
+            chip.pack(side=LEFT, padx=3, pady=2)
+            shown += 1
+        if filter_text and filter_text not in self._review_known_labels:
+            tk.Button(
+                frame,
+                text=f"+ create '{filter_text}'",
+                relief="flat",
+                cursor="hand2",
+                borderwidth=0,
+                padx=8,
+                pady=2,
+                background=THEME_ORANGE_TREE_SELECTED,
+                foreground=THEME_ORANGE_TEXT,
+                command=self._review_commit_label_entry,
+            ).pack(side=LEFT, padx=3, pady=2)
+        elif shown == 0:
+            tk.Label(
+                frame,
+                text="No labels yet — type one and press Enter.",
+                background=THEME_ORANGE_BG,
+                foreground=THEME_ORANGE_TEXT,
+            ).pack(side=LEFT)
 
     def _review_update_impact(self):
         kept = [i for i in self.curation_items if (i.get("decision") or "").upper() == "KEEP"]

@@ -104,4 +104,17 @@ def test_unique_destination_avoids_collisions(tmp_path):
     assert second == os.path.join(dest, "IMG_1 (1).jpg")
 
 
+def test_label_normalization_trims_and_lowercases():
+    assert MillerPicDesktopApp._normalize_subject_label("  Fishing Trip  ") == "fishing trip"
+    assert MillerPicDesktopApp._normalize_subject_label("BIRTHDAY") == "birthday"
+    assert MillerPicDesktopApp._normalize_subject_label(None) == ""
+
+
+def test_label_dedupe_collapses_case_variants():
+    # Anti-mess guardrail: "Fishing", "fishing ", "FISHING" must be one label.
+    result = MillerPicDesktopApp._dedupe_subjects(["Fishing", "fishing ", "FISHING", "Kids"])
+    assert result == ["fishing", "kids"]
+
+
+
 
