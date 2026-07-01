@@ -4,6 +4,7 @@ import math
 import mimetypes
 import os
 import re
+import shutil
 import threading
 import uuid
 import webbrowser
@@ -81,6 +82,7 @@ THEME_ORANGE_TEXT = "#3D2A12"
 THEME_ORANGE_TREE_BG = "#FFF9F2"
 THEME_ORANGE_TREE_ALT_BG = "#FFEFD8"
 THEME_ORANGE_TREE_SELECTED = "#FFD39C"
+THEME_BURST_BLUE = "#2F6FEB"
 
 
 def pretty_json(value):
@@ -512,7 +514,6 @@ class MillerPicDesktopApp:
         curation_folder_row.pack(fill=X)
         ttk.Entry(curation_folder_row, textvariable=self.curation_folder_var).pack(side=LEFT, fill=X, expand=True)
         ttk.Button(curation_folder_row, text="Browse", command=self.on_curation_select_folder).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(curation_folder_row, text="Scan", command=self.on_curation_scan_folder).pack(side=LEFT, padx=(8, 0))
 
         curation_actions_row = ttk.Frame(curation_frame)
         curation_actions_row.pack(fill=X, pady=(8, 0))
@@ -523,6 +524,7 @@ class MillerPicDesktopApp:
         ttk.Button(curation_actions_row, text="Mark KEEP", command=self.on_curation_mark_keep).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Mark REJECT", command=self.on_curation_mark_reject).pack(side=LEFT, padx=(8, 0))
         ttk.Button(curation_actions_row, text="Queue KEEP for Upload", command=self.on_curation_queue_keep_for_upload).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(curation_actions_row, text="Move REJECT → REJECTED_PHOTOS", command=self.on_curation_move_rejected).pack(side=LEFT, padx=(8, 0))
 
         curation_labels_row = ttk.Frame(curation_frame)
         curation_labels_row.pack(fill=X, pady=(8, 0))
@@ -550,6 +552,18 @@ class MillerPicDesktopApp:
         self.curation_tree.pack(fill=BOTH, expand=True, pady=(8, 0))
 
         ttk.Label(curation_frame, textvariable=self.curation_status_var).pack(anchor="w", pady=(8, 0))
+
+        maintenance_frame = ttk.LabelFrame(self.settings_tab, text="Maintenance", padding=10)
+        maintenance_frame.pack(fill=X, pady=(12, 0))
+        ttk.Label(
+            maintenance_frame,
+            text="Permanently delete everything in the REJECTED_PHOTOS folder. This cannot be undone.",
+        ).pack(anchor="w")
+        ttk.Button(
+            maintenance_frame,
+            text="Empty REJECTED_PHOTOS folder",
+            command=self.on_empty_rejected_folder,
+        ).pack(anchor="w", pady=(8, 0))
 
         output_frame = ttk.LabelFrame(self.settings_tab, text="Output", padding=10)
         output_frame.pack(fill=BOTH, expand=True, pady=(12, 0))
@@ -1575,14 +1589,63 @@ class MillerPicDesktopApp:
         if not folder_path:
             return
         self.curation_folder_var.set(folder_path)
-        self.curation_status_var.set(f"Curation: selected folder {folder_path}")
+        # Scan immediately so the user does not have to press Scan separately.
+        self.on_curation_scan_folder()
 
-    def _curation_group_key(self, file_path, modified_epoch):
-        file_name = os.path.basename(file_path)
-        stem = os.path.splitext(file_name)[0]
-        base = re.sub(r"([_\- ]?\d+)$", "", stem).strip().lower() or stem.lower()
-        bucket = int(modified_epoch // 30)
-        return f"{base}:{bucket}"
+    @staticmethod
+    def _compute_perceptual_hash(file_path):
+        """Return a 64-bit difference hash (dHash) for burst/duplicate detection."""
+        if Image is None:
+            return None
+        try:
+            with Image.open(file_path) as image:
+                prepared = ImageOps.exif_transpose(image) if ImageOps is not None else image
+                small = prepared.convert("L").resize((9, 8))
+            pixels = small.tobytes()
+        except Exception:
+            return None
+        bits = 0
+        for row in range(8):
+            for col in range(8):
+                left = pixels[row * 9 + col]
+                right = pixels[row * 9 + col + 1]
+                bits = (bits << 1) | (1 if left > right else 0)
+        return bits
+
+    @staticmethod
+    def _hamming_distance(hash_a, hash_b):
+        if hash_a is None or hash_b is None:
+            return 64
+        return bin(hash_a ^ hash_b).count("1")
+
+    @staticmethod
+    def _assign_burst_groups(items, threshold=12):
+        """Cluster time-ordered items into bursts of visually-similar photos.
+
+        Returns a list of group ids aligned to the input order.
+        """
+        n = len(items)
+        if n == 0:
+            return []
+        order = sorted(range(n), key=lambda i: items[i].get("modifiedEpoch") or 0)
+        group_of = [0] * n
+        current = 0
+        prev_hash = None
+        for position, idx in enumerate(order):
+            current_hash = items[idx].get("phash")
+            if position == 0:
+                group_of[idx] = current
+            elif (
+                prev_hash is not None
+                and current_hash is not None
+                and MillerPicDesktopApp._hamming_distance(prev_hash, current_hash) <= threshold
+            ):
+                group_of[idx] = current
+            else:
+                current += 1
+                group_of[idx] = current
+            prev_hash = current_hash
+        return group_of
 
     def on_curation_scan_folder(self):
         folder_path = self.curation_folder_var.get().strip()
@@ -1598,7 +1661,7 @@ class MillerPicDesktopApp:
         for row_id in self.curation_tree.get_children():
             self.curation_tree.delete(row_id)
 
-        count = 0
+        collected = []
         for root_dir, _, files in os.walk(folder_path):
             for file_name in files:
                 if self._is_ignored_sidecar_file(file_name):
@@ -1611,33 +1674,82 @@ class MillerPicDesktopApp:
                     modified_epoch = os.path.getmtime(file_path)
                 except OSError:
                     continue
-
                 try:
                     size_bytes = os.path.getsize(file_path)
                 except OSError:
                     size_bytes = 0
 
-                item = {
-                    "id": f"curation-{uuid.uuid4().hex}",
-                    "filePath": file_path,
-                    "fileName": file_name,
-                    "decision": "UNSET",
-                    "labels": [],
-                    "sizeBytes": size_bytes,
-                    "group": self._curation_group_key(file_path, modified_epoch),
-                    "modifiedAt": datetime.fromtimestamp(modified_epoch).strftime("%Y-%m-%d %H:%M:%S"),
-                }
-                self.curation_items.append(item)
-                self.curation_items_by_path[self._normalize_path(file_path)] = item
-                self.curation_tree.insert(
-                    "",
-                    "end",
-                    iid=item["id"],
-                    values=(item["group"], item["fileName"], item["decision"], "", item["modifiedAt"]),
+                collected.append(
+                    {
+                        "id": f"curation-{uuid.uuid4().hex}",
+                        "filePath": file_path,
+                        "fileName": file_name,
+                        "decision": "UNSET",
+                        "labels": [],
+                        "sizeBytes": size_bytes,
+                        "modifiedEpoch": modified_epoch,
+                        "modifiedAt": datetime.fromtimestamp(modified_epoch).strftime("%Y-%m-%d %H:%M:%S"),
+                        "phash": None,
+                    }
                 )
-                count += 1
+                if len(collected) % 25 == 0:
+                    self.curation_status_var.set(f"Curation: scanning… {len(collected)} files")
+                    self.curation_tree.update_idletasks()
 
-        self.curation_status_var.set(f"Curation: scanned {count} media files")
+        total = len(collected)
+
+        # Perceptual hash each image so similar shots can be grouped into bursts.
+        for position, entry in enumerate(collected):
+            if self._is_sync_image_file(entry["fileName"]):
+                entry["phash"] = self._compute_perceptual_hash(entry["filePath"])
+            if position % 15 == 0:
+                self.curation_status_var.set(f"Curation: analyzing similarity… {position + 1}/{total}")
+                self.curation_tree.update_idletasks()
+
+        group_of = self._assign_burst_groups(collected)
+        for index, entry in enumerate(collected):
+            entry["groupId"] = group_of[index] if index < len(group_of) else 0
+
+        # Order so each burst is contiguous, then label bursts (size > 1).
+        collected.sort(key=lambda e: (e.get("groupId", 0), e.get("modifiedEpoch") or 0))
+        group_sizes = {}
+        for entry in collected:
+            group_sizes[entry["groupId"]] = group_sizes.get(entry["groupId"], 0) + 1
+
+        burst_labels = {}
+        next_burst_number = 1
+        for entry in collected:
+            gid = entry["groupId"]
+            size = group_sizes.get(gid, 1)
+            entry["groupSize"] = size
+            if size > 1:
+                if gid not in burst_labels:
+                    burst_labels[gid] = f"Burst {next_burst_number}"
+                    next_burst_number += 1
+                entry["group"] = f"{burst_labels[gid]} ({size})"
+            else:
+                entry["group"] = "—"
+
+        self.curation_items = collected
+        for entry in collected:
+            self.curation_items_by_path[self._normalize_path(entry["filePath"])] = entry
+            self.curation_tree.insert(
+                "",
+                "end",
+                iid=entry["id"],
+                values=(
+                    entry["group"],
+                    entry["fileName"],
+                    entry["decision"],
+                    ", ".join(entry["labels"]),
+                    entry["modifiedAt"],
+                ),
+            )
+
+        burst_count = len(burst_labels)
+        self.curation_status_var.set(
+            f"Curation: scanned {total} files · {burst_count} burst group(s) found"
+        )
 
     def _get_selected_curation_items(self):
         selected_ids = self.curation_tree.selection()
@@ -1807,6 +1919,125 @@ class MillerPicDesktopApp:
 
         self.curation_status_var.set(f"Curation: queued {queued} KEEP items for upload")
 
+    @staticmethod
+    def _pictures_root(folder_path):
+        """Nearest 'Pictures' ancestor of the selected folder, else ~/Pictures."""
+        current = os.path.abspath(folder_path or ".")
+        while True:
+            if os.path.basename(current).lower() == "pictures":
+                return current
+            parent = os.path.dirname(current)
+            if not parent or parent == current:
+                break
+            current = parent
+        return os.path.join(os.path.expanduser("~"), "Pictures")
+
+    @staticmethod
+    def _unique_destination(dest_dir, file_name):
+        candidate = os.path.join(dest_dir, file_name)
+        if not os.path.exists(candidate):
+            return candidate
+        stem, ext = os.path.splitext(file_name)
+        counter = 1
+        while True:
+            candidate = os.path.join(dest_dir, f"{stem} ({counter}){ext}")
+            if not os.path.exists(candidate):
+                return candidate
+            counter += 1
+
+    def on_curation_move_rejected(self):
+        rejected = [i for i in self.curation_items if (i.get("decision") or "").upper() == "REJECT"]
+        if not rejected:
+            messagebox.showinfo("No rejected photos", "Mark some photos REJECT (D) first.")
+            return
+
+        dest_dir = os.path.join(self._pictures_root(self.curation_folder_var.get()), "REJECTED_PHOTOS")
+        if not messagebox.askyesno(
+            "Move rejected photos",
+            f"Move {len(rejected)} rejected photo(s) to:\n\n{dest_dir}\n\n"
+            "The files will be moved out of their current folders.",
+        ):
+            return
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except OSError as error:
+            messagebox.showerror("Cannot create folder", f"Could not create {dest_dir}:\n{error}")
+            return
+
+        moved_items = []
+        failed = 0
+        for item in rejected:
+            source = item.get("filePath")
+            if not source or not os.path.isfile(source):
+                failed += 1
+                continue
+            dest_path = self._unique_destination(dest_dir, os.path.basename(source))
+            try:
+                shutil.move(source, dest_path)
+                moved_items.append(item)
+            except (OSError, shutil.Error) as error:
+                failed += 1
+                self.log(f"Move failed for {source}: {error}")
+
+        if moved_items:
+            moved_ids = {i.get("id") for i in moved_items}
+            for item in moved_items:
+                self.curation_items_by_path.pop(self._normalize_path(item.get("filePath") or ""), None)
+                row_id = item.get("id")
+                if row_id and row_id in self.curation_tree.get_children():
+                    self.curation_tree.delete(row_id)
+            self.curation_items = [i for i in self.curation_items if i.get("id") not in moved_ids]
+            if getattr(self, "_review_window", None) is not None:
+                if self.curation_items:
+                    self._review_rebuild_groups()
+                    self._review_render()
+                else:
+                    self._review_close()
+
+        summary = f"moved {len(moved_items)} rejected photo(s) to REJECTED_PHOTOS"
+        if failed:
+            summary += f" ({failed} failed)"
+        self.curation_status_var.set("Curation: " + summary)
+        messagebox.showinfo("Move complete", summary + f"\n\n{dest_dir}")
+
+    def on_empty_rejected_folder(self):
+        dest_dir = os.path.join(self._pictures_root(self.curation_folder_var.get()), "REJECTED_PHOTOS")
+        if not os.path.isdir(dest_dir):
+            messagebox.showinfo("Nothing to empty", f"No REJECTED_PHOTOS folder found at:\n\n{dest_dir}")
+            return
+        files = [
+            os.path.join(dest_dir, name)
+            for name in os.listdir(dest_dir)
+            if os.path.isfile(os.path.join(dest_dir, name))
+        ]
+        if not files:
+            messagebox.showinfo("Nothing to empty", f"REJECTED_PHOTOS is already empty:\n\n{dest_dir}")
+            return
+        if not messagebox.askyesno(
+            "Permanently delete rejected photos?",
+            f"This will PERMANENTLY delete {len(files)} file(s) from:\n\n{dest_dir}\n\n"
+            "This cannot be undone. Are you sure?",
+            icon="warning",
+            default="no",
+        ):
+            return
+
+        deleted = 0
+        failed = 0
+        for file_path in files:
+            try:
+                os.remove(file_path)
+                deleted += 1
+            except OSError as error:
+                failed += 1
+                self.log(f"Delete failed for {file_path}: {error}")
+
+        summary = f"deleted {deleted} file(s) from REJECTED_PHOTOS"
+        if failed:
+            summary += f" ({failed} failed)"
+        self.log("Maintenance: " + summary)
+        messagebox.showinfo("Empty complete", summary)
+
     # ----- Review mode (keyboard-driven curation) -----
 
     @staticmethod
@@ -1844,16 +2075,15 @@ class MillerPicDesktopApp:
             except Exception:
                 self._review_window = None
 
-        self._review_index = 0
-        # Start on the first undecided photo if there is one.
-        for idx, item in enumerate(self.curation_items):
-            if (item.get("decision") or "UNSET").upper() == "UNSET":
-                self._review_index = idx
-                break
+        self._review_source_cache = {}
+        self._review_thumb_images = []
+        self._review_last_stage_w = 0
+        self._review_last_stage_h = 0
+        self._review_rebuild_groups(reset_position=True)
 
         window = tk.Toplevel(self.root)
         window.title("Review Photos")
-        window.geometry("1040x780")
+        window.geometry("1160x860")
         window.configure(background=THEME_ORANGE_BG)
         window.protocol("WM_DELETE_WINDOW", self._review_close)
         self._review_window = window
@@ -1862,32 +2092,47 @@ class MillerPicDesktopApp:
         header.pack(fill=X)
         self._review_position_var = tk.StringVar()
         ttk.Label(header, textvariable=self._review_position_var, font=("Segoe UI", 12, "bold")).pack(side=LEFT)
-        ttk.Label(header, text="Frame:  green = save   ·   red = drop   ·   gray = undecided").pack(side=RIGHT)
+        ttk.Label(
+            header,
+            text="Frame:  green = save  ·  red = drop  ·  gray = undecided  ·  blue = burst  ·  orange = focused",
+        ).pack(side=RIGHT)
 
-        # Filmstrip: previous 2, current (large center), next 2. Each photo is
-        # wrapped in a colored frame that reflects its keep/drop/undecided state.
-        strip = tk.Frame(window, background=THEME_ORANGE_BG)
-        strip.pack(fill=BOTH, expand=True, padx=12, pady=(0, 8))
-        self._review_strip = strip
-        self._review_last_strip_w = 0
-        self._review_last_strip_h = 0
+        stage = tk.Frame(window, background=THEME_ORANGE_BG)
+        stage.pack(fill=BOTH, expand=True, padx=10, pady=(0, 6))
+        self._review_stage = stage
+        stage.bind("<Configure>", self._on_review_stage_resize)
+
+        # Filmstrip stage: 7 photos with the current one centered. Burst members
+        # in the strip get a blue frame so you can see a burst approaching.
+        filmstrip = tk.Frame(stage, background=THEME_ORANGE_BG)
+        self._review_filmstrip_frame = filmstrip
         self._review_slots = []
-        for col, offset in enumerate((-2, -1, 0, 1, 2)):
-            strip.columnconfigure(col, weight=1)
-            border = tk.Frame(strip, background=THEME_ORANGE_BG)
-            border.grid(row=0, column=col, padx=6)
+        for offset in (-3, -2, -1, 0, 1, 2, 3):
+            border = tk.Frame(filmstrip, background=THEME_ORANGE_BG)
             inner = tk.Label(border, background=THEME_ORANGE_TREE_BG, anchor="center")
             inner.pack()
             self._review_slots.append({"offset": offset, "border": border, "inner": inner})
-        strip.rowconfigure(0, weight=1)
-        strip.bind("<Configure>", self._on_review_strip_resize)
-        self._review_source_cache = {}
+
+        # Burst stage: large focused photo + thumbnails of the whole burst.
+        burst = tk.Frame(stage, background=THEME_ORANGE_BG)
+        self._review_burst_frame = burst
+        self._review_thumbs_caption = tk.Label(burst, background=THEME_ORANGE_BG, foreground=THEME_ORANGE_TEXT)
+        self._review_thumbs_caption.pack(fill=X)
+        focus_holder = tk.Frame(burst, background=THEME_ORANGE_BG)
+        focus_holder.pack(fill=BOTH, expand=True)
+        self._review_focus_holder = focus_holder
+        self._review_focus_border = tk.Frame(focus_holder, background=THEME_ORANGE_BG)
+        self._review_focus_border.place(relx=0.5, rely=0.5, anchor="center")
+        self._review_focus_label = tk.Label(self._review_focus_border, background=THEME_ORANGE_TREE_BG)
+        self._review_focus_label.pack(padx=6, pady=6)
+        self._review_thumbs_frame = tk.Frame(burst, background=THEME_ORANGE_BG)
+        self._review_thumbs_frame.pack(fill=X, pady=(4, 0))
 
         label_row = ttk.Frame(window, padding=(12, 0))
         label_row.pack(fill=X)
         ttk.Label(label_row, text="Labels (Enter to add):").pack(side=LEFT)
         self._review_label_var = tk.StringVar()
-        self._review_label_entry = ttk.Entry(label_row, textvariable=self._review_label_var, width=48)
+        self._review_label_entry = ttk.Entry(label_row, textvariable=self._review_label_var, width=44)
         self._review_label_entry.pack(side=LEFT, padx=(8, 0))
         self._review_label_entry.bind("<Return>", self._review_add_labels)
         self._review_current_labels_var = tk.StringVar()
@@ -1895,31 +2140,39 @@ class MillerPicDesktopApp:
 
         controls = ttk.Frame(window, padding=(12, 8))
         controls.pack(fill=X)
-        ttk.Button(controls, text="◀ Prev (←)", command=self._review_prev).pack(side=LEFT)
-        ttk.Button(controls, text="Drop (D)", command=lambda: self._review_set_decision("REJECT")).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(controls, text="Save (S)", command=lambda: self._review_set_decision("KEEP")).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(controls, text="Next ▶ (→)", command=self._review_next).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(controls, text="◀ Prev (←)", command=lambda: self._review_go(-1)).pack(side=LEFT)
+        ttk.Button(controls, text="Drop (D)", command=lambda: self._review_decide_current("REJECT")).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(controls, text="Save (S)", command=lambda: self._review_decide_current("KEEP")).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(controls, text="Drop rest of burst & next (F)", command=self._review_finish_group).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(controls, text="Next ▶ (→)", command=lambda: self._review_go(1)).pack(side=LEFT, padx=(8, 0))
         ttk.Button(controls, text="Queue Keepers ▶ Upload", command=self._review_queue_all_keepers).pack(side=RIGHT)
+        ttk.Button(controls, text="Move Rejected ▶ REJECTED_PHOTOS", command=self.on_curation_move_rejected).pack(side=RIGHT, padx=(0, 8))
 
         impact = ttk.Frame(window, padding=(12, 0))
-        impact.pack(fill=X, pady=(0, 10))
+        impact.pack(fill=X, pady=(0, 8))
         self._review_impact_var = tk.StringVar()
         ttk.Label(impact, textvariable=self._review_impact_var, font=("Segoe UI", 10)).pack(side=LEFT)
 
-        hint = "Shortcuts:  S save (keep)   ·   D drop (reject)   ·   ← / → navigate   ·   U undo decision   ·   Esc close"
+        hint = (
+            "Shortcuts:  S save  ·  D drop  ·  ← / → move one photo  ·  "
+            "in a burst: click a thumbnail, S the best, F drops the rest  ·  U undo  ·  Esc close"
+        )
         ttk.Label(window, text=hint, padding=(12, 0, 12, 10)).pack(fill=X)
 
         for sequence in ("<Key-s>", "<Key-S>"):
-            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_set_decision("KEEP")))
+            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_decide_current("KEEP")))
         for sequence in ("<Key-d>", "<Key-D>"):
-            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_set_decision("REJECT")))
+            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_decide_current("REJECT")))
         for sequence in ("<Key-u>", "<Key-U>"):
-            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_set_decision("UNSET", advance=False)))
-        window.bind("<Right>", lambda e: self._review_shortcut(self._review_next))
-        window.bind("<Left>", lambda e: self._review_shortcut(self._review_prev))
+            window.bind(sequence, lambda e: self._review_shortcut(lambda: self._review_decide_current("UNSET", advance=False)))
+        for sequence in ("<Key-f>", "<Key-F>"):
+            window.bind(sequence, lambda e: self._review_shortcut(self._review_finish_group))
+        window.bind("<Right>", lambda e: self._review_shortcut(lambda: self._review_go(1)))
+        window.bind("<Left>", lambda e: self._review_shortcut(lambda: self._review_go(-1)))
         window.bind("<Escape>", lambda e: self._review_close())
 
-        self._review_show_current()
+        window.update_idletasks()
+        self._review_render()
         window.focus_set()
 
     def _review_is_typing(self):
@@ -1933,25 +2186,240 @@ class MillerPicDesktopApp:
             return
         action()
 
+    def _review_rebuild_groups(self, reset_position=False):
+        groups = []
+        index_group = []
+        current_gid = object()
+        for item in self.curation_items:
+            gid = item.get("groupId")
+            if not groups or gid != current_gid:
+                groups.append([])
+                current_gid = gid
+            groups[-1].append(item)
+        for group in groups:
+            for pos in range(len(group)):
+                index_group.append((group, pos))
+        self._review_groups = groups
+        self._review_index_group = index_group
+        if not self.curation_items:
+            self._review_index = 0
+            return
+        if reset_position:
+            start = 0
+            for idx, item in enumerate(self.curation_items):
+                if (item.get("decision") or "UNSET").upper() == "UNSET":
+                    start = idx
+                    break
+            self._review_index = start
+        else:
+            self._review_index = min(getattr(self, "_review_index", 0), len(self.curation_items) - 1)
+
     def _review_current_item(self):
         if not self.curation_items:
             return None
         self._review_index = max(0, min(self._review_index, len(self.curation_items) - 1))
         return self.curation_items[self._review_index]
 
-    def _review_show_current(self):
+    def _review_focused_item(self):
+        return self._review_current_item()
+
+    def _review_current_group_pos(self):
+        if not getattr(self, "_review_index_group", None):
+            return ([], 0)
+        idx = max(0, min(self._review_index, len(self._review_index_group) - 1))
+        return self._review_index_group[idx]
+
+    def _review_render(self):
         item = self._review_current_item()
         if item is None:
+            self._review_position_var.set("Nothing to review")
             return
+        group, pos = self._review_current_group_pos()
+        is_burst = len(group) > 1
         total = len(self.curation_items)
-        self._review_position_var.set(f"{self._review_index + 1} / {total}   —   {item.get('fileName') or ''}")
+        if is_burst:
+            self._review_filmstrip_frame.pack_forget()
+            self._review_burst_frame.pack(fill=BOTH, expand=True)
+        else:
+            self._review_burst_frame.pack_forget()
+            self._review_filmstrip_frame.pack(fill=BOTH, expand=True)
+        self._review_stage.update_idletasks()
+
+        if is_burst:
+            self._review_position_var.set(
+                f"{self._review_index + 1} / {total}   ·   {item.get('group') or 'Burst'}   ·   "
+                f"photo {pos + 1} of {len(group)}"
+            )
+            self._review_render_burst(group, pos)
+        else:
+            self._review_position_var.set(
+                f"{self._review_index + 1} / {total}   —   {item.get('fileName') or ''}"
+            )
+            self._review_render_filmstrip()
 
         labels = item.get("labels") or []
         self._review_current_labels_var.set(("Labels: " + ", ".join(labels)) if labels else "No labels")
         self._review_label_var.set("")
-
-        self._review_render_strip()
         self._review_update_impact()
+
+    def _review_render_filmstrip(self):
+        stage = self._review_stage
+        width = stage.winfo_width()
+        height = stage.winfo_height()
+        if width <= 1:
+            width = 1120
+        if height <= 1:
+            height = 520
+        # Center photo is ~50% larger than the neighbors; side photos shrink
+        # outward and tuck slightly under the center so it clearly dominates.
+        wf = {0: 0.45, 1: 0.17, 2: 0.11, 3: 0.07}
+        hf = {0: 0.96, 1: 0.64, 2: 0.46, 3: 0.30}
+        border_px = {0: 5, 1: 4, 2: 3, 3: 2}
+        overlap = width * 0.03
+        total = len(self.curation_items)
+
+        cw, w1, w2, w3 = (width * wf[0], width * wf[1], width * wf[2], width * wf[3])
+        cx = width / 2
+        pos_x = {0: cx}
+        pos_x[1] = cx + cw / 2 + w1 / 2 - overlap
+        pos_x[-1] = cx - (cw / 2 + w1 / 2 - overlap)
+        pos_x[2] = pos_x[1] + w1 / 2 + w2 / 2 - overlap
+        pos_x[-2] = pos_x[-1] - (w1 / 2 + w2 / 2 - overlap)
+        pos_x[3] = pos_x[2] + w2 / 2 + w3 / 2 - overlap
+        pos_x[-3] = pos_x[-2] - (w2 / 2 + w3 / 2 - overlap)
+
+        center_border = None
+        placed = []
+        for slot in self._review_slots:
+            offset = slot["offset"]
+            border = slot["border"]
+            inner = slot["inner"]
+            tier = abs(offset)
+            index = self._review_index + offset
+            if index < 0 or index >= total:
+                border.place_forget()
+                continue
+            item = self.curation_items[index]
+            if item.get("groupSize", 1) > 1:
+                color = THEME_BURST_BLUE
+            else:
+                color = self._review_decision_color(item.get("decision"))
+            border.configure(background=color)
+            inner.pack_configure(padx=border_px[tier], pady=border_px[tier])
+            box = (max(48, int(width * wf[tier])), max(48, int(height * hf[tier])))
+            source = self._review_source_image(item.get("filePath"))
+            if source is not None:
+                resized = source.copy()
+                resized.thumbnail(box)
+                image_tk = ImageTk.PhotoImage(resized)
+                inner.configure(image=image_tk, text="")
+                inner.image = image_tk
+            else:
+                inner.configure(image="", text="(no preview)")
+                inner.image = None
+            border.place(x=int(pos_x[offset]), rely=0.5, anchor="center")
+            placed.append(slot)
+        # Stack so photos closer to the center sit on top of the outer ones
+        # (on both sides), with the center photo on top of everything.
+        for slot in sorted(placed, key=lambda s: -abs(s["offset"])):
+            slot["border"].lift()
+
+    def _review_render_burst(self, group, focus_pos):
+        self._review_thumbs_caption.configure(
+            text="Burst — click a thumbnail to enlarge, Save (S) the best, then Drop rest of burst & next (F)."
+        )
+        for widget in self._review_thumbs_frame.winfo_children():
+            widget.destroy()
+        self._review_thumb_images = []
+        window_width = self._review_window.winfo_width() or 1100
+        columns = max(1, min(len(group), (window_width - 40) // 140))
+        group_start = self._review_index - focus_pos
+        for pos, item in enumerate(group):
+            is_focused = pos == focus_pos
+            border_color = THEME_ORANGE_ACCENT if is_focused else self._review_decision_color(item.get("decision"))
+            cell = tk.Frame(self._review_thumbs_frame, background=border_color)
+            cell.grid(row=pos // columns, column=pos % columns, padx=3, pady=3)
+            thumb = tk.Label(cell, background=THEME_ORANGE_TREE_BG, cursor="hand2")
+            pad = 4 if is_focused else 2
+            thumb.pack(padx=pad, pady=pad)
+            source = self._review_source_image(item.get("filePath"))
+            if source is not None:
+                resized = source.copy()
+                resized.thumbnail((120, 96))
+                image_tk = ImageTk.PhotoImage(resized)
+                thumb.configure(image=image_tk)
+                thumb.image = image_tk
+                self._review_thumb_images.append(image_tk)
+            else:
+                thumb.configure(text="(no preview)")
+            thumb.bind("<Button-1>", lambda _e, gi=group_start + pos: self._review_focus_thumb(gi))
+        self._review_render_focus()
+
+    def _review_render_focus(self):
+        item = self._review_current_item()
+        if item is None:
+            return
+        holder = self._review_focus_holder
+        width = holder.winfo_width()
+        height = holder.winfo_height()
+        if width <= 1:
+            width = 1040
+        if height <= 1:
+            height = 380
+        self._review_focus_border.configure(background=self._review_decision_color(item.get("decision")))
+        source = self._review_source_image(item.get("filePath"))
+        box = (max(64, int(width * 0.96)), max(64, int(height * 0.96)))
+        if source is not None:
+            resized = source.copy()
+            resized.thumbnail(box)
+            image_tk = ImageTk.PhotoImage(resized)
+            self._review_focus_label.configure(image=image_tk, text="")
+            self._review_focus_label.image = image_tk
+        else:
+            self._review_focus_label.configure(image="", text="(no preview)")
+            self._review_focus_label.image = None
+
+    def _on_review_stage_resize(self, event):
+        if getattr(self, "_review_window", None) is None:
+            return
+        if abs(event.width - self._review_last_stage_w) < 16 and abs(event.height - self._review_last_stage_h) < 16:
+            return
+        self._review_last_stage_w = event.width
+        self._review_last_stage_h = event.height
+        self._review_render()
+
+    def _review_focus_thumb(self, global_index):
+        self._review_index = max(0, min(global_index, len(self.curation_items) - 1))
+        self._review_render()
+
+    def _review_go(self, delta):
+        if not self.curation_items:
+            return
+        self._review_index = max(0, min(self._review_index + delta, len(self.curation_items) - 1))
+        self._review_render()
+
+    def _review_decide_current(self, decision, advance=True):
+        item = self._review_current_item()
+        if item is None:
+            return
+        item["decision"] = decision
+        self._refresh_curation_item_row(item)
+        if advance and decision in ("KEEP", "REJECT"):
+            self._review_index = min(self._review_index + 1, len(self.curation_items) - 1)
+        self._review_render()
+
+    def _review_finish_group(self):
+        group, pos = self._review_current_group_pos()
+        if not group:
+            return
+        for item in group:
+            if (item.get("decision") or "UNSET").upper() != "KEEP":
+                item["decision"] = "REJECT"
+                self._refresh_curation_item_row(item)
+        group_start = self._review_index - pos
+        self._review_index = min(group_start + len(group), len(self.curation_items) - 1)
+        self._review_render()
+
 
     @staticmethod
     def _review_decision_color(decision):
@@ -1977,85 +2445,8 @@ class MillerPicDesktopApp:
         self._review_source_cache[file_path] = source
         return source
 
-    def _on_review_strip_resize(self, event):
-        if getattr(self, "_review_window", None) is None:
-            return
-        if abs(event.width - self._review_last_strip_w) < 12 and abs(event.height - self._review_last_strip_h) < 12:
-            return
-        self._review_last_strip_w = event.width
-        self._review_last_strip_h = event.height
-        self._review_render_strip()
-
-    def _review_render_strip(self):
-        strip = getattr(self, "_review_strip", None)
-        width = strip.winfo_width() if strip is not None else 0
-        height = strip.winfo_height() if strip is not None else 0
-        if width <= 1:
-            width = 1000
-        if height <= 1:
-            height = 560
-        # Center photo dominates; neighbors scale down outward. Width fractions
-        # sum to < 1 to leave room for padding and colored frames.
-        slot_size = {
-            0: (int(width * 0.44), int(height * 0.94)),
-            1: (int(width * 0.17), int(height * 0.60)),
-            2: (int(width * 0.09), int(height * 0.34)),
-        }
-        slot_border = {0: 6, 1: 4, 2: 3}
-        total = len(self.curation_items)
-        for slot in self._review_slots:
-            offset = slot["offset"]
-            border = slot["border"]
-            inner = slot["inner"]
-            index = self._review_index + offset
-            if index < 0 or index >= total:
-                inner.configure(image="", text="")
-                inner.image = None
-                inner.pack_configure(padx=0, pady=0)
-                border.configure(background=THEME_ORANGE_BG)
-                continue
-
-            item = self.curation_items[index]
-            source = self._review_source_image(item.get("filePath"))
-            border.configure(background=self._review_decision_color(item.get("decision")))
-            inner.pack_configure(padx=slot_border[abs(offset)], pady=slot_border[abs(offset)])
-            box = slot_size[abs(offset)]
-            if source is not None and box[0] > 1 and box[1] > 1:
-                resized = source.copy()
-                resized.thumbnail(box)
-                image_tk = ImageTk.PhotoImage(resized)
-                inner.configure(image=image_tk, text="")
-                inner.image = image_tk
-            else:
-                inner.configure(image="", text="(no preview)")
-                inner.image = None
-
-    def _review_set_decision(self, decision, advance=True):
-        item = self._review_current_item()
-        if item is None:
-            return
-        item["decision"] = decision
-        self._refresh_curation_item_row(item)
-        if advance and decision in ("KEEP", "REJECT"):
-            self._review_advance()
-        else:
-            self._review_show_current()
-
-    def _review_advance(self):
-        if self._review_index < len(self.curation_items) - 1:
-            self._review_index += 1
-        self._review_show_current()
-
-    def _review_next(self):
-        self._review_advance()
-
-    def _review_prev(self):
-        if self._review_index > 0:
-            self._review_index -= 1
-        self._review_show_current()
-
     def _review_add_labels(self, _event=None):
-        item = self._review_current_item()
+        item = self._review_focused_item()
         if item is None:
             return
         labels = self._dedupe_subjects(self._parse_subjects_csv(self._review_label_var.get()))
