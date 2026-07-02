@@ -149,6 +149,8 @@ class MillerPicDesktopApp:
         self.curation_folder_var = tk.StringVar()
         self.curation_status_var = tk.StringVar(value="Curation: select a local folder to begin")
         self.curation_bulk_labels_var = tk.StringVar()
+        self.review_auto_advance_var = tk.BooleanVar(value=True)
+        self._review_hide_dropped_var = tk.BooleanVar(value=False)
         self.curation_items = []
         self.curation_items_by_path = {}
         self._queue_refresh_scheduled = False
@@ -2072,10 +2074,14 @@ class MillerPicDesktopApp:
         self._review_filmstrip_frame = filmstrip
         self._review_slots = []
         for offset in (-3, -2, -1, 0, 1, 2, 3):
-            border = tk.Frame(filmstrip, background=THEME_ORANGE_BG)
-            inner = tk.Label(border, background=THEME_ORANGE_TREE_BG, anchor="center")
+            outer = tk.Frame(filmstrip, background=THEME_ORANGE_BG)
+            inner_border = tk.Frame(outer, background=THEME_ORANGE_BG)
+            inner_border.pack()
+            inner = tk.Label(inner_border, background=THEME_ORANGE_TREE_BG, anchor="center")
             inner.pack()
-            self._review_slots.append({"offset": offset, "border": border, "inner": inner})
+            self._review_slots.append(
+                {"offset": offset, "outer": outer, "inner_border": inner_border, "inner": inner}
+            )
 
         # Burst stage: large focused photo + thumbnails of the whole burst.
         burst = tk.Frame(stage, background=THEME_ORANGE_BG)
@@ -2113,6 +2119,18 @@ class MillerPicDesktopApp:
         ttk.Button(controls, text="Save (S)", command=lambda: self._review_decide_current("KEEP")).pack(side=LEFT, padx=(8, 0))
         ttk.Button(controls, text="Drop rest of burst & next (F)", command=self._review_finish_group).pack(side=LEFT, padx=(8, 0))
         ttk.Button(controls, text="Next ▶ (→)", command=lambda: self._review_go(1)).pack(side=LEFT, padx=(8, 0))
+        ttk.Checkbutton(
+            controls,
+            text="Advance after decision",
+            variable=self.review_auto_advance_var,
+            command=self._save_local_state,
+        ).pack(side=LEFT, padx=(16, 0))
+        ttk.Checkbutton(
+            controls,
+            text="Hide dropped from scroll",
+            variable=self._review_hide_dropped_var,
+            command=self._review_on_toggle_hide_dropped,
+        ).pack(side=LEFT, padx=(12, 0))
         ttk.Button(controls, text="Queue Keepers ▶ Upload", command=self._review_queue_all_keepers).pack(side=RIGHT)
         ttk.Button(controls, text="Move Rejected ▶ REJECTED_PHOTOS", command=self.on_curation_move_rejected).pack(side=RIGHT, padx=(0, 8))
 
@@ -2241,9 +2259,9 @@ class MillerPicDesktopApp:
         # outward and tuck slightly under the center so it clearly dominates.
         wf = {0: 0.45, 1: 0.17, 2: 0.11, 3: 0.07}
         hf = {0: 0.96, 1: 0.64, 2: 0.46, 3: 0.30}
-        border_px = {0: 5, 1: 4, 2: 3, 3: 2}
+        inner_pad = {0: 8, 1: 6, 2: 6, 3: 4}
+        outer_pad = {0: 8, 1: 6, 2: 4, 3: 4}
         overlap = width * 0.03
-        total = len(self.curation_items)
 
         cw, w1, w2, w3 = (width * wf[0], width * wf[1], width * wf[2], width * wf[3])
         cx = width / 2
@@ -2255,24 +2273,33 @@ class MillerPicDesktopApp:
         pos_x[3] = pos_x[2] + w2 / 2 + w3 / 2 - overlap
         pos_x[-3] = pos_x[-2] - (w2 / 2 + w3 / 2 - overlap)
 
-        center_border = None
+        mapping = self._review_filmstrip_slot_indices()
         placed = []
         for slot in self._review_slots:
             offset = slot["offset"]
-            border = slot["border"]
+            outer = slot["outer"]
+            inner_border = slot["inner_border"]
             inner = slot["inner"]
             tier = abs(offset)
-            index = self._review_index + offset
-            if index < 0 or index >= total:
-                border.place_forget()
+            index = mapping.get(offset)
+            if index is None:
+                outer.place_forget()
                 continue
             item = self.curation_items[index]
+            decision_color = self._review_decision_color(item.get("decision"))
+            decided = (item.get("decision") or "UNSET").upper() in ("KEEP", "REJECT")
             if item.get("groupSize", 1) > 1:
-                color = THEME_BURST_BLUE
+                # Burst member: blue outer ring always; inner ring shows the
+                # save/drop decision (or blue while still undecided).
+                outer_color = THEME_BURST_BLUE
+                inner_color = decision_color if decided else THEME_BURST_BLUE
             else:
-                color = self._review_decision_color(item.get("decision"))
-            border.configure(background=color)
-            inner.pack_configure(padx=border_px[tier], pady=border_px[tier])
+                outer_color = decision_color
+                inner_color = decision_color
+            outer.configure(background=outer_color)
+            inner_border.configure(background=inner_color)
+            inner.pack_configure(padx=inner_pad[tier], pady=inner_pad[tier])
+            inner_border.pack_configure(padx=outer_pad[tier], pady=outer_pad[tier])
             box = (max(48, int(width * wf[tier])), max(48, int(height * hf[tier])))
             source = self._review_source_image(item.get("filePath"))
             if source is not None:
@@ -2284,12 +2311,12 @@ class MillerPicDesktopApp:
             else:
                 inner.configure(image="", text="(no preview)")
                 inner.image = None
-            border.place(x=int(pos_x[offset]), rely=0.5, anchor="center")
+            outer.place(x=int(pos_x[offset]), rely=0.5, anchor="center")
             placed.append(slot)
         # Stack so photos closer to the center sit on top of the outer ones
         # (on both sides), with the center photo on top of everything.
         for slot in sorted(placed, key=lambda s: -abs(s["offset"])):
-            slot["border"].lift()
+            slot["outer"].lift()
 
     def _review_render_burst(self, group, focus_pos):
         self._review_thumbs_caption.configure(
@@ -2359,10 +2386,47 @@ class MillerPicDesktopApp:
         self._review_index = max(0, min(global_index, len(self.curation_items) - 1))
         self._review_render()
 
+    def _review_next_visible_after(self, index):
+        hide = self._review_hide_dropped_var.get()
+        for i in range(index + 1, len(self.curation_items)):
+            if not hide or (self.curation_items[i].get("decision") or "").upper() != "REJECT":
+                return i
+        return None
+
+    def _review_prev_visible_before(self, index):
+        hide = self._review_hide_dropped_var.get()
+        for i in range(index - 1, -1, -1):
+            if not hide or (self.curation_items[i].get("decision") or "").upper() != "REJECT":
+                return i
+        return None
+
+    def _review_filmstrip_slot_indices(self):
+        # Center is always the current photo; neighbors walk outward, skipping
+        # dropped photos when "Hide dropped from scroll" is on.
+        mapping = {0: self._review_index}
+        i = self._review_index
+        for step in (1, 2, 3):
+            i = self._review_next_visible_after(i) if i is not None else None
+            mapping[step] = i
+        i = self._review_index
+        for step in (1, 2, 3):
+            i = self._review_prev_visible_before(i) if i is not None else None
+            mapping[-step] = i
+        return mapping
+
+    def _review_on_toggle_hide_dropped(self):
+        self._save_local_state()
+        self._review_render()
+
     def _review_go(self, delta):
         if not self.curation_items:
             return
-        self._review_index = max(0, min(self._review_index + delta, len(self.curation_items) - 1))
+        if delta > 0:
+            target = self._review_next_visible_after(self._review_index)
+        else:
+            target = self._review_prev_visible_before(self._review_index)
+        if target is not None:
+            self._review_index = target
         self._review_render()
 
     def _review_decide_current(self, decision, advance=True):
@@ -2371,8 +2435,10 @@ class MillerPicDesktopApp:
             return
         item["decision"] = decision
         self._refresh_curation_item_row(item)
-        if advance and decision in ("KEEP", "REJECT"):
-            self._review_index = min(self._review_index + 1, len(self.curation_items) - 1)
+        if advance and decision in ("KEEP", "REJECT") and self.review_auto_advance_var.get():
+            target = self._review_next_visible_after(self._review_index)
+            if target is not None:
+                self._review_index = target
         self._review_render()
 
     def _review_finish_group(self):
@@ -2384,7 +2450,9 @@ class MillerPicDesktopApp:
                 item["decision"] = "REJECT"
                 self._refresh_curation_item_row(item)
         group_start = self._review_index - pos
-        self._review_index = min(group_start + len(group), len(self.curation_items) - 1)
+        last = group_start + len(group) - 1
+        target = self._review_next_visible_after(last)
+        self._review_index = target if target is not None else min(last, len(self.curation_items) - 1)
         self._review_render()
 
 
@@ -2771,6 +2839,12 @@ class MillerPicDesktopApp:
         self.managed_folders = sorted(set(managed))
         self.synced_files = synced_files
         self.folder_sync_state = folder_sync_state
+        auto_advance = data.get("reviewAutoAdvance")
+        if isinstance(auto_advance, bool):
+            self.review_auto_advance_var.set(auto_advance)
+        hide_dropped = data.get("reviewHideDropped")
+        if isinstance(hide_dropped, bool):
+            self._review_hide_dropped_var.set(hide_dropped)
         for folder_path in self.managed_folders:
             self.folder_sync_state.setdefault(folder_path, {"state": "IDLE", "lastSync": "", "error": ""})
         self.local_albums = self._normalize_local_albums(data.get("localAlbums") or [])
@@ -2781,6 +2855,8 @@ class MillerPicDesktopApp:
             "syncedFiles": self.synced_files,
             "folderSyncState": self.folder_sync_state,
             "localAlbums": self.local_albums,
+            "reviewAutoAdvance": bool(self.review_auto_advance_var.get()),
+            "reviewHideDropped": bool(self._review_hide_dropped_var.get()),
         }
         state_path = self._desktop_state_file_path()
         try:
