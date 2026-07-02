@@ -29,7 +29,7 @@
         "tool",
         "run",
         "--from",
-        "awslabs.aws-documentation-mcp-server@1.1.19",
+        "awslabs.aws-documentation-mcp-server@1.1.26",
         "awslabs.aws-documentation-mcp-server.exe"
       ],
       "env": {

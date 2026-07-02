@@ -72,7 +72,7 @@ resource "aws_kms_alias" "lambda_artifacts_bucket" {
 }
 
 resource "aws_s3_bucket" "lambda_artifacts" {
-  #checkov:skip=CKV_AWS_18: Access logging deferred for artifacts bucket to avoid incremental cost; CloudTrail + strict IAM controls are in place. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_18: Access logging deferred for artifacts bucket to avoid incremental cost; CloudTrail + strict IAM controls are in place. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   #checkov:skip=CKV_AWS_144: Cross-region replication deferred due budget constraints for Lambda artifact workflow. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   #checkov:skip=CKV2_AWS_62: Artifact object notifications are intentionally omitted; signing workflow already has deterministic job status polling and does not require bucket event fan-out. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   bucket = local.lambda_artifacts_bucket_name
@@ -138,7 +138,7 @@ resource "aws_signer_signing_profile" "lambda" {
 }
 
 resource "aws_s3_bucket" "terraform_state" {
-  #checkov:skip=CKV_AWS_18: Budget-approved exception for bootstrap/state bucket; S3 access logs deferred to avoid additional bucket + log retention cost. Compensating controls: CloudTrail and strict IAM on state resources. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_18: Budget-approved exception for bootstrap/state bucket; S3 access logs deferred to avoid additional bucket + log retention cost. Compensating controls: CloudTrail and strict IAM on state resources. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   #checkov:skip=CKV_AWS_144: Cross-region replication deferred due cost constraints for bootstrap/state workload; current durability posture is sufficient for present recovery objectives. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   #checkov:skip=CKV2_AWS_62: Object-level event notifications are intentionally omitted for terraform state workload because they do not reduce relevant security risk and add operational cost/noise. Security objective is strict state-object access control, enforced by explicit deny bucket policy (only terraform deployer user + account root), plus KMS encryption, versioning, and CloudTrail. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   bucket = local.state_bucket_name

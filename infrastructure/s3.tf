@@ -29,7 +29,7 @@ resource "aws_kms_alias" "photos_bucket" {
 }
 
 resource "aws_s3_bucket" "photos" {
-  #checkov:skip=CKV_AWS_18: Budget-approved exception for family-scale workload; access logs deferred to avoid recurring storage/request cost. Compensating controls: CloudTrail, CloudWatch alarms, versioning, public access block. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_18: Budget-approved exception for family-scale workload; access logs deferred to avoid recurring storage/request cost. Compensating controls: CloudTrail, CloudWatch alarms, versioning, public access block. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   #checkov:skip=CKV_AWS_144: Cross-region replication deferred due cost constraints for family-scale workload; durability and recovery objectives currently met without CRR. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   #checkov:skip=CKV2_AWS_62: Object-level event notifications are intentionally omitted for this workload to avoid non-value operational noise/cost. Security objective is access control, enforced via explicit deny bucket policy (only Lambda app role sessions + account root for object actions), plus public access block, KMS encryption, and CloudTrail. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
   bucket = local.photo_bucket_name

@@ -192,7 +192,7 @@ resource "aws_iam_role_policy_attachment" "app_policy_attach" {
 }
 
 resource "aws_lambda_function" "upload" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-upload-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -223,7 +223,7 @@ resource "aws_lambda_function" "upload" {
 }
 
 resource "aws_lambda_function" "download" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-download-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -255,7 +255,7 @@ resource "aws_lambda_function" "download" {
 }
 
 resource "aws_lambda_function" "list" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-list-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -286,7 +286,7 @@ resource "aws_lambda_function" "list" {
 }
 
 resource "aws_lambda_function" "upload_complete" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-upload-complete-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -317,7 +317,7 @@ resource "aws_lambda_function" "upload_complete" {
 }
 
 resource "aws_lambda_function" "delete" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-delete-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -348,7 +348,7 @@ resource "aws_lambda_function" "delete" {
 }
 
 resource "aws_lambda_function" "trash" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-trash-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -379,7 +379,7 @@ resource "aws_lambda_function" "trash" {
 }
 
 resource "aws_lambda_function" "hard_delete" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-hard-delete-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -410,7 +410,7 @@ resource "aws_lambda_function" "hard_delete" {
 }
 
 resource "aws_lambda_function" "patch_photo" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-patch-photo-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -440,7 +440,7 @@ resource "aws_lambda_function" "patch_photo" {
 }
 
 resource "aws_lambda_function" "search" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-search-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -470,7 +470,7 @@ resource "aws_lambda_function" "search" {
 }
 
 resource "aws_lambda_function" "get_photo" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-get-photo-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -500,7 +500,7 @@ resource "aws_lambda_function" "get_photo" {
 }
 
 resource "aws_lambda_function" "albums_create" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-albums-create-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -530,7 +530,7 @@ resource "aws_lambda_function" "albums_create" {
 }
 
 resource "aws_lambda_function" "albums_list" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-albums-list-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -560,7 +560,7 @@ resource "aws_lambda_function" "albums_list" {
 }
 
 resource "aws_lambda_function" "albums_photos" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-albums-photos-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -592,7 +592,7 @@ resource "aws_lambda_function" "albums_photos" {
 }
 
 resource "aws_lambda_function" "albums_apply_labels" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-albums-apply-labels-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
@@ -623,7 +623,7 @@ resource "aws_lambda_function" "albums_apply_labels" {
 }
 
 resource "aws_lambda_function" "albums_remove_labels" {
-  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-03-16.
+  #checkov:skip=CKV_AWS_50: Budget-approved exception; X-Ray tracing deferred to avoid always-on trace ingestion/storage cost for family workload. Compensating controls: CloudWatch alarms/logs and DLQ coverage. Owner=MillerPic Platform Team; ReviewBy=2026-10-02; LastReviewed=2026-07-02 (no change; still budget-justified for current family-scale workload).
   function_name                  = "${var.project_name}-albums-remove-labels-${var.environment}"
   role                           = aws_iam_role.lambda_exec.arn
   runtime                        = local.lambda_runtime
