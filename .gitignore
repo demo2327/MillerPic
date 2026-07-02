@@ -21,6 +21,7 @@ backend/src/handlers/test_*.py
 # Desktop OAuth local secrets
 desktop-client/google_oauth_client.json
 desktop-client/desktop_state.json
+desktop-client/curation_state/
 
 # GCP foundation export (org/billing/account metadata)
 gcp/

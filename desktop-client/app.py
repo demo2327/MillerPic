@@ -65,6 +65,7 @@ SYNC_VIDEO_EXTENSIONS = {
 MAX_QUEUE_PARALLELISM = 4
 DEFAULT_QUEUE_PARALLELISM = 2
 DEFAULT_DESKTOP_STATE_FILE = os.path.join(os.path.dirname(__file__), "desktop_state.json")
+CURATION_STATE_DIR = os.path.join(os.path.dirname(__file__), "curation_state")
 DEFAULT_AUTH_STATE_FILE = os.path.join(
     os.environ.get("APPDATA") or os.path.expanduser("~"),
     "MillerPic",
@@ -1731,6 +1732,16 @@ class MillerPicDesktopApp:
             else:
                 entry["group"] = "—"
 
+        # Restore any decisions/labels saved from a previous session for this folder.
+        self._curation_active_folder = folder_path
+        saved_state = self._load_curation_state(folder_path)
+        if saved_state:
+            for entry in collected:
+                saved = saved_state.get(self._normalize_path(entry["filePath"]))
+                if saved:
+                    entry["decision"] = saved.get("decision") or "UNSET"
+                    entry["labels"] = list(saved.get("labels") or [])
+
         self.curation_items = collected
         for entry in collected:
             self.curation_items_by_path[self._normalize_path(entry["filePath"])] = entry
@@ -1748,8 +1759,10 @@ class MillerPicDesktopApp:
             )
 
         burst_count = len(burst_labels)
+        restored_count = len(saved_state)
+        restored_suffix = f" · restored {restored_count} saved decision(s)" if restored_count else ""
         self.curation_status_var.set(
-            f"Curation: scanned {total} files · {burst_count} burst group(s) found"
+            f"Curation: scanned {total} files · {burst_count} burst group(s) found{restored_suffix}"
         )
 
     def _get_selected_curation_items(self):
@@ -1784,6 +1797,7 @@ class MillerPicDesktopApp:
         for item in selected_items:
             item["decision"] = "KEEP"
             self._refresh_curation_item_row(item)
+        self._persist_curation_decisions()
         self.curation_status_var.set(f"Curation: marked KEEP on {len(selected_items)} items")
 
     def on_curation_mark_reject(self):
@@ -1794,6 +1808,7 @@ class MillerPicDesktopApp:
         for item in selected_items:
             item["decision"] = "REJECT"
             self._refresh_curation_item_row(item)
+        self._persist_curation_decisions()
         self.curation_status_var.set(f"Curation: marked REJECT on {len(selected_items)} items")
 
     def on_curation_apply_bulk_labels(self):
@@ -1808,6 +1823,7 @@ class MillerPicDesktopApp:
         for item in selected_items:
             item["labels"] = self._dedupe_subjects((item.get("labels") or []) + labels)
             self._refresh_curation_item_row(item)
+        self._persist_curation_decisions()
         self.curation_status_var.set(f"Curation: applied labels to {len(selected_items)} items")
 
     def _rotate_image_file(self, file_path, angle):
@@ -1909,6 +1925,63 @@ class MillerPicDesktopApp:
                 return candidate
             counter += 1
 
+    @staticmethod
+    def _curation_state_path(folder_path):
+        normalized = MillerPicDesktopApp._normalize_path(folder_path)
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+        return os.path.join(CURATION_STATE_DIR, f"{digest}.json")
+
+    @staticmethod
+    def _load_curation_state(folder_path):
+        """Return {normalized_file_path: {"decision":.., "labels":[...]}} saved
+        for this folder, or {} if none / unreadable."""
+        state_path = MillerPicDesktopApp._curation_state_path(folder_path)
+        if not os.path.isfile(state_path):
+            return {}
+        try:
+            with open(state_path, "r", encoding="utf-8") as state_file:
+                data = json.load(state_file)
+        except Exception:
+            return {}
+        items = data.get("items")
+        return items if isinstance(items, dict) else {}
+
+    def _persist_curation_decisions(self):
+        folder_path = getattr(self, "_curation_active_folder", None)
+        if not folder_path:
+            return
+        # Only store photos with a real decision or labels; UNSET/no-label
+        # photos don't need to survive a restart (they're the scan default).
+        items = {}
+        for item in self.curation_items:
+            decision = (item.get("decision") or "UNSET").upper()
+            labels = item.get("labels") or []
+            if decision == "UNSET" and not labels:
+                continue
+            path_key = self._normalize_path(item.get("filePath") or "")
+            if not path_key:
+                continue
+            items[path_key] = {"decision": decision, "labels": labels}
+
+        state_path = self._curation_state_path(folder_path)
+        try:
+            os.makedirs(CURATION_STATE_DIR, exist_ok=True)
+            if not items:
+                # Nothing left to remember for this folder; remove any stale file.
+                if os.path.isfile(state_path):
+                    os.remove(state_path)
+                return
+            payload = {
+                "folderPath": folder_path,
+                "savedAt": datetime.now(timezone.utc).isoformat(),
+                "items": items,
+            }
+            with open(state_path, "w", encoding="utf-8") as state_file:
+                json.dump(payload, state_file, indent=2, ensure_ascii=False)
+        except OSError as error:
+            self.log(f"Could not save curation state: {error}")
+
+
     def on_curation_move_rejected(self):
         rejected = [i for i in self.curation_items if (i.get("decision") or "").upper() == "REJECT"]
         if not rejected:
@@ -1951,6 +2024,7 @@ class MillerPicDesktopApp:
                 if row_id and row_id in self.curation_tree.get_children():
                     self.curation_tree.delete(row_id)
             self.curation_items = [i for i in self.curation_items if i.get("id") not in moved_ids]
+            self._persist_curation_decisions()
             if getattr(self, "_review_window", None) is not None:
                 if self.curation_items:
                     self._review_rebuild_groups()
@@ -2435,6 +2509,7 @@ class MillerPicDesktopApp:
             return
         item["decision"] = decision
         self._refresh_curation_item_row(item)
+        self._persist_curation_decisions()
         if advance and decision in ("KEEP", "REJECT") and self.review_auto_advance_var.get():
             target = self._review_next_visible_after(self._review_index)
             if target is not None:
@@ -2449,6 +2524,7 @@ class MillerPicDesktopApp:
             if (item.get("decision") or "UNSET").upper() != "KEEP":
                 item["decision"] = "REJECT"
                 self._refresh_curation_item_row(item)
+        self._persist_curation_decisions()
         group_start = self._review_index - pos
         last = group_start + len(group) - 1
         target = self._review_next_visible_after(last)
@@ -2514,6 +2590,7 @@ class MillerPicDesktopApp:
             current.append(normalized)
         item["labels"] = current
         self._refresh_curation_item_row(item)
+        self._persist_curation_decisions()
         self._review_render_labels()
 
     def _review_commit_label_entry(self, _event=None):
@@ -2526,6 +2603,7 @@ class MillerPicDesktopApp:
         self._review_add_known_label(normalized)
         item["labels"] = self._dedupe_subjects((item.get("labels") or []) + [normalized])
         self._refresh_curation_item_row(item)
+        self._persist_curation_decisions()
         self._review_label_var.set("")
         self._review_render_labels()
 

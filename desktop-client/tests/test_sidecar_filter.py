@@ -5,6 +5,7 @@ ROOT = os.path.dirname(os.path.dirname(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+import app
 from app import MillerPicDesktopApp
 
 
@@ -114,6 +115,68 @@ def test_label_dedupe_collapses_case_variants():
     # Anti-mess guardrail: "Fishing", "fishing ", "FISHING" must be one label.
     result = MillerPicDesktopApp._dedupe_subjects(["Fishing", "fishing ", "FISHING", "Kids"])
     assert result == ["fishing", "kids"]
+
+
+def test_curation_state_path_is_stable_and_folder_specific(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "CURATION_STATE_DIR", str(tmp_path))
+    folder_a = str(tmp_path / "AppleHill")
+    path_1 = MillerPicDesktopApp._curation_state_path(folder_a)
+    path_2 = MillerPicDesktopApp._curation_state_path(folder_a)
+    assert path_1 == path_2
+    folder_b = str(tmp_path / "Camera Roll")
+    assert MillerPicDesktopApp._curation_state_path(folder_b) != path_1
+
+
+def test_load_curation_state_missing_file_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "CURATION_STATE_DIR", str(tmp_path))
+    assert MillerPicDesktopApp._load_curation_state(str(tmp_path / "NoSuchFolder")) == {}
+
+
+def test_persist_and_reload_curation_decisions_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "CURATION_STATE_DIR", str(tmp_path / "curation_state"))
+    folder = str(tmp_path / "AppleHill")
+    os.makedirs(folder, exist_ok=True)
+    photo_a = os.path.join(folder, "IMG_0001.HEIC")
+    photo_b = os.path.join(folder, "IMG_0002.HEIC")
+    photo_c = os.path.join(folder, "IMG_0003.HEIC")
+
+    instance = MillerPicDesktopApp.__new__(MillerPicDesktopApp)
+    instance._curation_active_folder = folder
+    instance.curation_items = [
+        {"filePath": photo_a, "decision": "KEEP", "labels": ["applehill"]},
+        {"filePath": photo_b, "decision": "REJECT", "labels": []},
+        {"filePath": photo_c, "decision": "UNSET", "labels": []},  # not worth saving
+    ]
+
+    instance._persist_curation_decisions()
+
+    restored = MillerPicDesktopApp._load_curation_state(folder)
+    assert restored[MillerPicDesktopApp._normalize_path(photo_a)] == {
+        "decision": "KEEP",
+        "labels": ["applehill"],
+    }
+    assert restored[MillerPicDesktopApp._normalize_path(photo_b)]["decision"] == "REJECT"
+    # UNSET/no-label items are the scan default and should not be persisted.
+    assert MillerPicDesktopApp._normalize_path(photo_c) not in restored
+
+
+def test_persist_curation_decisions_removes_stale_file_when_nothing_to_save(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "CURATION_STATE_DIR", str(tmp_path / "curation_state"))
+    folder = str(tmp_path / "Camera Roll")
+    os.makedirs(folder, exist_ok=True)
+    photo = os.path.join(folder, "IMG_0001.HEIC")
+
+    instance = MillerPicDesktopApp.__new__(MillerPicDesktopApp)
+    instance._curation_active_folder = folder
+    instance.curation_items = [{"filePath": photo, "decision": "KEEP", "labels": []}]
+    instance._persist_curation_decisions()
+    assert MillerPicDesktopApp._load_curation_state(folder)  # something was saved
+
+    # Undo the decision; nothing left worth remembering.
+    instance.curation_items = [{"filePath": photo, "decision": "UNSET", "labels": []}]
+    instance._persist_curation_decisions()
+    assert MillerPicDesktopApp._load_curation_state(folder) == {}
+
 
 
 
