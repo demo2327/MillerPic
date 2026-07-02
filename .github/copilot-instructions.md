@@ -1,108 +1,33 @@
-<!-- Use this file to provide workspace-specific custom instructions to Copilot. For more details, visit https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file -->
-- [x] Verify that the copilot-instructions.md file in the .github directory is created.
+# MillerPic — Copilot Instructions
 
-- [x] Clarify Project Requirements
-	<!-- Project details provided: AWS serverless project with Windows desktop and Android clients for storing pictures/videos -->
+## Project Overview
+Family photo storage platform on AWS serverless architecture (S3, Lambda, API Gateway, DynamoDB), with a Python/Tkinter desktop client for curation and sync. Product direction: **curate-before-upload** — only "keep" decisions reach the cloud, so storage cost stays low and the library stays clean by construction.
 
-- [ ] Scaffold the Project
+## Repo Structure (accurate as of 2026-07)
+- `backend/` — Python Lambda handlers (`src/handlers/`) + pytest suite (`tests/`).
+- `desktop-client/` — Python/Tkinter desktop app (`app.py`) with Sync / Library / Curation / Settings tabs. Curation review mode (keyboard-driven filmstrip + burst detection + sticky label chips) lives here.
+- `infrastructure/` — Terraform for the app stack; `infrastructure/bootstrap/` — Terraform for bootstrap resources (state backend, signing).
+- `docs/` — architecture, security, deployment, sprint plans/closeouts.
 
-- [ ] Scaffold the Project
-	<!--
-	Ensure that the previous step has been marked as completed.
-	Call project setup tool with projectType parameter.
-	Run scaffolding command to create project files and folders.
-	Use '.' as the working directory.
-	If no appropriate projectType is available, search documentation using available tools.
-	Otherwise, create the project structure manually using available file creation tools.
-	-->
+**Note:** README/SPECIFICATION.md describe a React web gallery and React Native Android app as done — neither exists yet. Reality is the Python backend + Python desktop client only. Treat those docs as aspirational, not current state, unless verified otherwise.
 
-- [ ] Customize the Project
-	<!--
-	Verify that all previous steps have been completed successfully and you have marked the step as completed.
-	Develop a plan to modify codebase according to user requirements.
-	Apply modifications using appropriate tools and user-provided references.
-	Skip this step for "Hello World" projects.
-	-->
+## Git Workflow — REQUIRED
+- **Always create a feature branch and open a pull request for any code, infrastructure, or config change.** Never commit directly to `main`, even for small fixes, housekeeping, or docs.
+- Base new branches on an up-to-date `main`.
+- Use descriptive branch names (e.g. `feature/curation-labeling`, `fix/appledouble-sidecar`).
+- Write a clear PR description: summary, what changed, test evidence, risk/rollback.
+- Reference related GitHub issues in commit messages/PR descriptions (`closes #NN`) where applicable.
+- Do not push to `main` directly even if branch protection can be bypassed — the bypass exists for emergencies, not routine workflow.
 
-- [ ] Install Required Extensions
-	<!-- ONLY install extensions provided mentioned in the get_project_setup_info. Skip this step otherwise and mark as completed. -->
+## Testing & Validation
+- Backend: `cd backend; python -m pytest -q` (or via the venv at `desktop-client/.venv`).
+- Desktop: `python -m pytest desktop-client/tests -q`.
+- Compile check: `python -m py_compile backend/src/handlers/upload.py backend/src/handlers/download.py backend/src/handlers/list.py desktop-client/app.py`.
+- Terraform: `terraform -chdir=infrastructure fmt -check -recursive` and `terraform -chdir=infrastructure plan` before merging infra changes.
+- Run relevant tests before opening a PR; keep them green.
 
-- [ ] Compile the Project
-	<!--
-	Verify that all previous steps have been completed.
-	Install any missing dependencies.
-	Run diagnostics and resolve any issues.
-	Check for markdown files in project folder for relevant instructions on how to do this.
-	-->
-
-- [ ] Create and Run Task
-	<!--
-	Verify that all previous steps have been completed.
-	Check https://code.visualstudio.com/docs/debugtest/tasks to determine if the project needs a task. If so, use the create_and_run_task to create and launch a task based on package.json, README.md, and project structure.
-	Skip this step otherwise.
-	 -->
-
-- [ ] Launch the Project
-	<!--
-	Verify that all previous steps have been completed.
-	Prompt user for debug mode, launch only if confirmed.
-	 -->
-
-- [ ] Ensure Documentation is Complete
-	<!--
-	Verify that all previous steps have been completed.
-	Verify that README.md and the copilot-instructions.md file in the .github directory exists and contains current project information.
-	Clean up the copilot-instructions.md file in the .github directory by removing all HTML comments.
-	 -->
-
-<!--
-## Execution Guidelines
-PROGRESS TRACKING:
-- If any tools are available to manage the above todo list, use it to track progress through this checklist.
-- After completing each step, mark it complete and add a summary.
-- Read current todo list status before starting each new step.
-
-COMMUNICATION RULES:
-- Avoid verbose explanations or printing full command outputs.
-- If a step is skipped, state that briefly (e.g. "No extensions needed").
-- Do not explain project structure unless asked.
-- Keep explanations concise and focused.
-
-DEVELOPMENT RULES:
-- Use '.' as the working directory unless user specifies otherwise.
-- Avoid adding media or external links unless explicitly requested.
-- Use placeholders only with a note that they should be replaced.
-- Use VS Code API tool only for VS Code extension projects.
-- Once the project is created, it is already opened in Visual Studio Code—do not suggest commands to open this project in Visual Studio again.
-- If the project setup information has additional rules, follow them strictly.
-
-FOLDER CREATION RULES:
-- Always use the current directory as the project root.
-- If you are running any terminal commands, use the '.' argument to ensure that the current working directory is used ALWAYS.
-- Do not create a new folder unless the user explicitly requests it besides a .vscode folder for a tasks.json file.
-- If any of the scaffolding commands mention that the folder name is not correct, let the user know to create a new folder with the correct name and then reopen it again in vscode.
-
-EXTENSION INSTALLATION RULES:
-- Only install extension specified by the get_project_setup_info tool. DO NOT INSTALL any other extensions.
-
-PROJECT CONTENT RULES:
-- If the user has not specified project details, assume they want a "Hello World" project as a starting point.
-- Avoid adding links of any type (URLs, files, folders, etc.) or integrations that are not explicitly required.
-- Avoid generating images, videos, or any other media files unless explicitly requested.
-- If you need to use any media assets as placeholders, let the user know that these are placeholders and should be replaced with the actual assets later.
-- Ensure all generated components serve a clear purpose within the user's requested workflow.
-- If a feature is assumed but not confirmed, prompt the user for clarification before including it.
-- If you are working on a VS Code extension, use the VS Code API tool with a query to find relevant VS Code API references and samples related to that query.
-
-TASK COMPLETION RULES:
-- Your task is complete when:
-  - Project is successfully scaffolded and compiled without errors
-  - copilot-instructions.md file in the .github directory exists in the project
-  - README.md file exists and is up to date
-  - User is provided with clear instructions to debug/launch the project
-
-Before starting a new task in the above plan, update progress in the plan.
--->
-- Work through each checklist item systematically.
-- Keep communication concise and focused.
-- Follow development best practices.
+## Conventions
+- Desktop app class: `MillerPicDesktopApp` in `desktop-client/app.py`.
+- Curation decisions/labels persist per-folder in gitignored `desktop-client/curation_state/` (sidecar files keyed by a hash of the folder path) — restored automatically on re-scan.
+- Checkov suppressions require an inline `#checkov:skip=CKV_XXX: <reason>` comment placed **inside** the resource block, with Owner/ReviewBy recorded, and must be mirrored in `docs/SECURITY.md`'s suppression register.
+- MCP server versions are pinned in `.vscode/mcp.json`; review monthly per `docs/MCP_SETUP.md`.
